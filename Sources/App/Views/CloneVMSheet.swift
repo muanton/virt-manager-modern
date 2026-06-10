@@ -46,6 +46,21 @@ struct CloneVMSheet: View {
             .padding([.top, .horizontal])
 
             Form {
+                if isRunning {
+                    Section {
+                        HStack(alignment: .top, spacing: 10) {
+                            Label("The VM is running — cloning needs it shut off so the disks are consistent.",
+                                  systemImage: "exclamationmark.triangle.fill")
+                                .foregroundStyle(.orange)
+                            Spacer()
+                            Button("Shut Down Now") {
+                                Task { await session.perform(.shutdown, on: domain.uuid) }
+                            }
+                        }
+                        Text("This dialog unlocks automatically once the VM is off.")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                }
                 Section {
                     LabeledContent("New name") {
                         TextField("", text: $newName).frame(maxWidth: 260)
@@ -98,12 +113,18 @@ struct CloneVMSheet: View {
                 Button(working ? "Cloning…" : "Clone") { clone() }
                     .keyboardShortcut(.defaultAction)
                     .buttonStyle(.borderedProminent)
-                    .disabled(working || !loaded || newName.isEmpty || nameTaken)
+                    .disabled(working || !loaded || newName.isEmpty || nameTaken || isRunning)
             }
             .padding()
         }
         .frame(width: 560)
         .task { await load() }
+    }
+
+    /// Live state — session.domains is @Published, so the sheet unlocks the
+    /// moment the VM finishes shutting down.
+    private var isRunning: Bool {
+        session.domain(uuid: domain.uuid)?.isActive ?? domain.isActive
     }
 
     private var nameTaken: Bool {
