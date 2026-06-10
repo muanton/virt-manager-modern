@@ -92,6 +92,9 @@ struct DomainDetailView: View {
                     confirmForceOff = true
                 } label: { Label("Force Off", systemImage: "bolt.fill") }
                     .help("Force Off — pull the plug immediately (unsaved data is lost)")
+                Button {} label: { Label("Clone", systemImage: "plus.square.on.square") }
+                    .disabled(true)
+                    .help("Clone — shut the VM down first to make an independent copy")
                 Button(role: .destructive) {
                     onDelete(domain)
                 } label: { Label("Delete", systemImage: "trash") }
