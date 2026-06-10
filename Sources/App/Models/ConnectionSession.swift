@@ -138,6 +138,23 @@ final class ConnectionSession: ObservableObject, Identifiable {
         }
     }
 
+    /// Uploads a local file (ISO) into a pool; returns the new volume path.
+    /// `progress` arrives on the main actor (0…1).
+    func uploadISO(pool: String, name: String, localURL: URL,
+                   progress: @escaping @MainActor (Double) -> Void) async -> String? {
+        guard let conn else { return nil }
+        do {
+            let path = try await conn.uploadVolume(pool: pool, name: name, localURL: localURL) { p in
+                Task { @MainActor in progress(p) }
+            }
+            await loadHostResources(force: true)
+            return path
+        } catch {
+            lastError = error.localizedDescription
+            return nil
+        }
+    }
+
     // MARK: - Snapshots
 
     func snapshots(uuid: String) async -> [Snapshot]? {

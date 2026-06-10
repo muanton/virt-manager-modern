@@ -18,6 +18,7 @@ struct AddHardwareSheet: View {
     }
     @State private var category: Category = .disk
     @State private var working = false
+    @State private var showingUpload = false
     @State private var error: String?
 
     // Storage
@@ -150,6 +151,10 @@ struct AddHardwareSheet: View {
                 ForEach(isoVolumes) { Text("\($0.name) (\($0.pool))").tag($0.path) }
             }
             LabeledContent("Or path") { TextField("/path/to.iso", text: $customPath) }
+            Button("Upload ISO from this Mac…") { showingUpload = true }
+                .sheet(isPresented: $showingUpload) {
+                    UploadISOSheet(session: model.session) { path in volumePath = path }
+                }
             Picker("Bus", selection: $cdromBus) { ForEach(["sata","ide","scsi"], id: \.self) { Text($0) } }
         case .network:
             Picker("Source", selection: $netSel) {

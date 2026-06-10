@@ -44,6 +44,7 @@ struct NewVMSheet: View {
     @State private var startNow = true
     @State private var openConsole = true
     @State private var working = false
+    @State private var showingUpload = false
     @State private var error: String?
 
     var body: some View {
@@ -285,12 +286,21 @@ struct NewVMSheet: View {
         Grid(alignment: .leading, horizontalSpacing: 14, verticalSpacing: 10) {
             GridRow {
                 Text(title).gridColumnAlignment(.trailing)
-                Picker("", selection: binding) {
-                    Text("Select…").tag("")
-                    ForEach(volumes) { Text($0.name).tag($0.path) }
-                }.labelsHidden().frame(width: 320)
+                HStack(spacing: 8) {
+                    Picker("", selection: binding) {
+                        Text("Select…").tag("")
+                        ForEach(volumes) { Text($0.name).tag($0.path) }
+                    }.labelsHidden().fixedSize().frame(width: 240, alignment: .leading)
+                    Button("Upload ISO…") { showingUpload = true }
+                        .help("Upload an ISO from this Mac to the host")
+                }
             }
             GridRow { Text("Or path"); TextField(prompt, text: binding).frame(width: 320) }
+        }
+        .sheet(isPresented: $showingUpload) {
+            UploadISOSheet(session: session) { path in
+                binding.wrappedValue = path
+            }
         }
     }
 

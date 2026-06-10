@@ -245,6 +245,10 @@ public final class LibvirtConnection: @unchecked Sendable {
         }
     }
 
+    /// The raw handle for long-running stream transfers that must not occupy
+    /// the serial queue (virConnect is thread-safe per libvirt's guarantees).
+    func rawConnectionForStreaming() -> OpaquePointer { conn }
+
     /// Looks up a domain by UUID, runs `body`, and always frees the handle.
     static func withDomain<T>(
         _ conn: OpaquePointer, uuid: String, _ body: (OpaquePointer) throws -> T
