@@ -12,6 +12,10 @@ consoles rendered natively in the window.
 |---|---|---|
 | ![Console](docs/screenshots/console.png) | ![Hardware](docs/screenshots/hardware.png) | ![New VM](docs/screenshots/new-vm.png) |
 
+| Serial console (headless VMs) | Snapshots |
+|---|---|
+| ![Serial](docs/screenshots/serial.png) | ![Snapshots](docs/screenshots/snapshots.png) |
+
 ## Why
 
 Running the original virt-manager on macOS is a rough ride: it's a GTK app
