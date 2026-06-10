@@ -112,6 +112,32 @@ final class ConnectionSession: ObservableObject, Identifiable {
         return (try? await conn.interfaceAddresses(uuid: uuid)) ?? []
     }
 
+    /// Defines a domain and returns its UUID (used by Clone).
+    func defineAndReturnUUID(_ xml: String) async -> String? {
+        guard let conn else { return nil }
+        do {
+            let summary = try await conn.defineXML(xml)
+            await refresh()
+            return summary.uuid
+        } catch {
+            lastError = error.localizedDescription
+            return nil
+        }
+    }
+
+    /// Clones a volume in its pool; returns the new path.
+    func cloneVolume(path: String, newName: String) async -> String? {
+        guard let conn else { return nil }
+        do {
+            let p = try await conn.cloneVolume(path: path, newName: newName)
+            hostResourcesLoaded = false
+            return p
+        } catch {
+            lastError = error.localizedDescription
+            return nil
+        }
+    }
+
     // MARK: - Snapshots
 
     func snapshots(uuid: String) async -> [Snapshot]? {

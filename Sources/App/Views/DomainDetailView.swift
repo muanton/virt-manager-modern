@@ -7,8 +7,9 @@ struct DomainDetailView: View {
     @ObservedObject var session: ConnectionSession
     let uuid: String
     var openConsoleOnce: Binding<Bool> = .constant(false)
-    /// Opens the Delete VM sheet (presented by ContentView).
+    /// Open the Delete / Clone sheets (presented by ContentView).
     var onDelete: (DomainSummary) -> Void = { _ in }
+    var onClone: (DomainSummary) -> Void = { _ in }
 
     @EnvironmentObject private var appState: AppState
     @State private var confirmForceOff = false
@@ -98,6 +99,10 @@ struct DomainDetailView: View {
             } else {
                 button("Start", "play.fill", .start,
                        help: "Start — power on the VM")
+                Button {
+                    onClone(domain)
+                } label: { Label("Clone", systemImage: "plus.square.on.square") }
+                    .help("Clone — create an independent copy of this VM")
                 Button(role: .destructive) {
                     onDelete(domain)
                 } label: { Label("Delete", systemImage: "trash") }

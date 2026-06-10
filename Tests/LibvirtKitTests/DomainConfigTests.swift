@@ -395,3 +395,40 @@ extension DomainConfigTests {
         XCTAssertNotNil(cfg2.addBlockReason(for: .smartcard))
     }
 }
+
+extension DomainConfigTests {
+    func testCloneXMLTransform() throws {
+        let xml = """
+        <domain type='kvm'>
+          <name>orig</name><uuid>aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee</uuid>
+          <memory unit='KiB'>1048576</memory><vcpu>2</vcpu>
+          <os><type arch='aarch64'>hvm</type>
+            <nvram>/var/lib/libvirt/qemu/nvram/orig_VARS.fd</nvram>
+          </os>
+          <devices>
+            <disk type='file' device='disk'>
+              <source file='/i/orig.qcow2'/><target dev='vda' bus='virtio'/>
+            </disk>
+            <disk type='file' device='cdrom'>
+              <source file='/i/installer.iso'/><target dev='sda' bus='sata'/>
+            </disk>
+            <interface type='network'>
+              <source network='default'/><mac address='52:54:00:11:22:33'/>
+            </interface>
+          </devices>
+        </domain>
+        """
+        let cfg = try DomainConfig(xml: xml)
+        let out = cfg.xmlForClone(newName: "copy",
+                                  diskPathMap: ["/i/orig.qcow2": "/i/copy.qcow2",
+                                                "/i/installer.iso": ""])  // skip ISO
+        XCTAssertTrue(out.contains("<name>copy</name>"))
+        XCTAssertFalse(out.contains("aaaaaaaa-bbbb"), "fresh UUID expected")
+        XCTAssertFalse(out.contains("52:54:00:11:22:33"), "MACs must be stripped")
+        XCTAssertFalse(out.contains("nvram"), "per-VM NVRAM must be dropped")
+        XCTAssertTrue(out.contains("/i/copy.qcow2"))
+        XCTAssertFalse(out.contains("/i/installer.iso"), "skipped disk keeps no source")
+        // The original document is untouched.
+        XCTAssertTrue(cfg.xmlString().contains("<name>orig</name>"))
+    }
+}

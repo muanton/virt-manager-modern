@@ -173,6 +173,51 @@ public final class LibvirtConnection: @unchecked Sendable {
         }
     }
 
+    /// Clones a storage volume within its pool (same capacity and format).
+    /// Returns the new volume's path.
+    public func cloneVolume(path: String, newName: String) async throws -> String {
+        try await run { conn in
+            guard let src = virStorageVolLookupByPath(conn, path) else {
+                throw LibvirtError.lastError(fallback: "\(path) is not managed by a storage pool")
+            }
+            defer { virStorageVolFree(src) }
+            guard let pool = virStoragePoolLookupByVolume(src) else {
+                throw LibvirtError.lastError(fallback: "No pool for \(path)")
+            }
+            defer { virStoragePoolFree(pool) }
+
+            var info = virStorageVolInfo()
+            virStorageVolGetInfo(src, &info)
+            // Keep the source's format (parse it from the volume XML).
+            var format = "qcow2"
+            if let xmlC = virStorageVolGetXMLDesc(src, 0) {
+                defer { free(xmlC) }
+                if let doc = try? XMLDocument(xmlString: String(cString: xmlC)),
+                   let f = doc.rootElement()?.elements(forName: "target").first?
+                       .elements(forName: "format").first?
+                       .attribute(forName: "type")?.stringValue {
+                    format = f
+                }
+            }
+            let xml = """
+            <volume>
+              <name>\(Self.xmlEscape(newName))</name>
+              <capacity>\(info.capacity)</capacity>
+              <target><format type='\(format)'/></target>
+            </volume>
+            """
+            guard let vol = virStorageVolCreateXMLFrom(pool, xml, src, 0) else {
+                throw LibvirtError.lastError(fallback: "Failed to clone \(path)")
+            }
+            defer { virStorageVolFree(vol) }
+            guard let p = virStorageVolGetPath(vol) else {
+                throw LibvirtError.lastError(fallback: "Clone created but has no path")
+            }
+            defer { free(p) }
+            return String(cString: p)
+        }
+    }
+
     /// Deletes a storage volume by its path (the file backing a VM disk).
     /// Fails if the path doesn't belong to any libvirt storage pool.
     public func deleteVolume(path: String) async throws {

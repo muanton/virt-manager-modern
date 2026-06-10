@@ -596,6 +596,46 @@ public struct DomainConfig {
         el.insertChild(s, at: 0)
     }
 
+    /// XML for a clone of this domain: new name, fresh UUID, MACs stripped
+    /// (libvirt regenerates), per-VM NVRAM dropped (regenerated from the
+    /// firmware template), and disk sources remapped per `diskPathMap`
+    /// (old path → new path; unmapped disks keep their source = shared).
+    public func xmlForClone(newName: String, diskPathMap: [String: String]) -> String {
+        let copy = root.copy() as! XMLElement
+
+        func setChildText(_ name: String, _ value: String) {
+            for old in copy.elements(forName: name) { copy.removeChild(at: old.index) }
+            let el = XMLElement(name: name)
+            el.stringValue = value
+            copy.insertChild(el, at: 0)
+        }
+        setChildText("uuid", UUID().uuidString.lowercased())
+        setChildText("name", newName)
+
+        // NVRAM is per-VM state — two clones must not share the file.
+        for os in copy.elements(forName: "os") {
+            for nv in os.elements(forName: "nvram") { os.removeChild(at: nv.index) }
+        }
+
+        if let devs = copy.elements(forName: "devices").first {
+            for el in devs.children?.compactMap({ $0 as? XMLElement }) ?? [] {
+                if el.name == "interface" {
+                    for mac in el.elements(forName: "mac") { el.removeChild(at: mac.index) }
+                }
+                if el.name == "disk", let src = el.elements(forName: "source").first,
+                   let file = src.attribute(forName: "file")?.stringValue,
+                   let newPath = diskPathMap[file] {
+                    if newPath.isEmpty {
+                        el.removeChild(at: src.index)   // skip → empty drive
+                    } else {
+                        src.attribute(forName: "file")?.stringValue = newPath
+                    }
+                }
+            }
+        }
+        return copy.xmlString(options: [.nodePrettyPrint])
+    }
+
     /// Sets a disk's backing file path.
     public func setDiskSource(deviceID: String, path: String) {
         guard let el = element(forDeviceID: deviceID) else { return }

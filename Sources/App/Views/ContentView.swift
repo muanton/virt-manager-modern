@@ -12,6 +12,7 @@ struct ContentView: View {
     @State private var editor: ConnectionEditorContext?
     @State private var newVMSession: ConnectionSession?
     @State private var deleteTarget: DeleteVMContext?
+    @State private var cloneTarget: CloneVMContext?
     @State private var openConsoleOnce = false
 
     var body: some View {
@@ -23,6 +24,9 @@ struct ContentView: View {
                 onNewVM: { newVMSession = $0 },
                 onDeleteVM: { session, domain in
                     deleteTarget = DeleteVMContext(session: session, domain: domain)
+                },
+                onCloneVM: { session, domain in
+                    cloneTarget = CloneVMContext(session: session, domain: domain)
                 })
             .navigationSplitViewColumnWidth(min: 240, ideal: 270, max: 400)
         } detail: {
@@ -31,6 +35,9 @@ struct ContentView: View {
                                  openConsoleOnce: $openConsoleOnce,
                                  onDelete: { domain in
                                      deleteTarget = DeleteVMContext(session: session, domain: domain)
+                                 },
+                                 onClone: { domain in
+                                     cloneTarget = CloneVMContext(session: session, domain: domain)
                                  })
                     .id(selection)
             } else {
@@ -53,6 +60,11 @@ struct ContentView: View {
             NewVMSheet(session: session) { uuid, openConsole in
                 openConsoleOnce = openConsole
                 selection = DomainSelection(sessionID: session.id, uuid: uuid)
+            }
+        }
+        .sheet(item: $cloneTarget) { ctx in
+            CloneVMSheet(session: ctx.session, domain: ctx.domain) { uuid in
+                selection = DomainSelection(sessionID: ctx.session.id, uuid: uuid)
             }
         }
         .sheet(item: $deleteTarget) { ctx in

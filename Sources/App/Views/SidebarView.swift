@@ -8,12 +8,13 @@ struct SidebarView: View {
     var onEdit: (ConnectionConfig) -> Void
     var onNewVM: (ConnectionSession) -> Void
     var onDeleteVM: (ConnectionSession, DomainSummary) -> Void
+    var onCloneVM: (ConnectionSession, DomainSummary) -> Void
 
     var body: some View {
         List(selection: $selection) {
             ForEach(appState.sessions) { session in
                 SessionSection(session: session, selection: $selection, onEdit: onEdit,
-                               onNewVM: onNewVM, onDeleteVM: onDeleteVM)
+                               onNewVM: onNewVM, onDeleteVM: onDeleteVM, onCloneVM: onCloneVM)
             }
         }
         .listStyle(.sidebar)
@@ -60,6 +61,7 @@ private struct SessionSection: View {
     var onEdit: (ConnectionConfig) -> Void
     var onNewVM: (ConnectionSession) -> Void
     var onDeleteVM: (ConnectionSession, DomainSummary) -> Void
+    var onCloneVM: (ConnectionSession, DomainSummary) -> Void
 
     var body: some View {
         Section {
@@ -90,6 +92,12 @@ private struct SessionSection: View {
                         DomainRow(domain: domain, stats: session.stats[domain.uuid])
                             .tag(DomainSelection(sessionID: session.id, uuid: domain.uuid))
                             .contextMenu {
+                                if domain.isActive {
+                                    Button("Clone (requires shut off)") {}.disabled(true)
+                                } else {
+                                    Button("Clone \(domain.name)…") { onCloneVM(session, domain) }
+                                }
+                                Divider()
                                 Button("Delete \(domain.name)…", role: .destructive) {
                                     onDeleteVM(session, domain)
                                 }
