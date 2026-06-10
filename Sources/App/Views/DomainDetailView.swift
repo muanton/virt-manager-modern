@@ -37,6 +37,8 @@ struct DomainDetailView: View {
                         .tabItem { Label("Console", systemImage: "display") }.tag(1)
                     HardwareTab(session: session, uuid: uuid)
                         .tabItem { Label("Hardware", systemImage: "slider.horizontal.3") }.tag(2)
+                    SnapshotsTab(session: session, domain: domain)
+                        .tabItem { Label("Snapshots", systemImage: "camera") }.tag(3)
                 }
                 .padding()
                 .navigationTitle(domain.name)

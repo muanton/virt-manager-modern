@@ -112,6 +112,35 @@ final class ConnectionSession: ObservableObject, Identifiable {
         return (try? await conn.interfaceAddresses(uuid: uuid)) ?? []
     }
 
+    // MARK: - Snapshots
+
+    func snapshots(uuid: String) async -> [Snapshot]? {
+        guard let conn else { return nil }
+        do { return try await conn.listSnapshots(uuid: uuid) }
+        catch { lastError = error.localizedDescription; return nil }
+    }
+
+    func createSnapshot(uuid: String, name: String, description: String) async -> Bool {
+        guard let conn else { return false }
+        do { try await conn.createSnapshot(uuid: uuid, name: name, description: description); return true }
+        catch { lastError = error.localizedDescription; return false }
+    }
+
+    func revertToSnapshot(uuid: String, name: String) async -> Bool {
+        guard let conn else { return false }
+        do {
+            try await conn.revertToSnapshot(uuid: uuid, name: name)
+            await refresh()
+            return true
+        } catch { lastError = error.localizedDescription; return false }
+    }
+
+    func deleteSnapshot(uuid: String, name: String) async -> Bool {
+        guard let conn else { return false }
+        do { try await conn.deleteSnapshot(uuid: uuid, name: name); return true }
+        catch { lastError = error.localizedDescription; return false }
+    }
+
     func perform(_ action: DomainAction, on uuid: String) async {
         guard let conn else { return }
         do {
