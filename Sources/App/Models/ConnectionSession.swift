@@ -155,6 +155,15 @@ final class ConnectionSession: ObservableObject, Identifiable {
         }
     }
 
+    /// Opens the VM's serial console stream (see SerialConsoleView).
+    func openSerialConsole(uuid: String,
+                           onData: @escaping @Sendable (Data) -> Void,
+                           onClose: @escaping @Sendable (String?) -> Void) async -> SerialConsoleHandle? {
+        guard let conn else { return nil }
+        do { return try await conn.openSerialConsole(uuid: uuid, onData: onData, onClose: onClose) }
+        catch { lastError = error.localizedDescription; return nil }
+    }
+
     // MARK: - Snapshots
 
     func snapshots(uuid: String) async -> [Snapshot]? {

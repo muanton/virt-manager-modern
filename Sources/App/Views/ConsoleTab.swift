@@ -12,6 +12,8 @@ struct ConsoleTab: View {
     @ObservedObject var vnc: VNCSession
     @ObservedObject var spice: SpiceConsoleSession
     @State private var graphics: GraphicsInfo?
+    @State private var hasSerialDevice = false
+    @State private var consoleMode = "graphical"   // graphical | serial
     @State private var videoModel: String?
     @State private var loaded = false
     @State private var loadError: String?
@@ -28,6 +30,14 @@ struct ConsoleTab: View {
         GeometryReader { geo in
             VStack(spacing: 0) {
                 if showQXLBanner, videoModel == "qxl" { qxlBanner }
+                if domain.state.isActive, graphics != nil, hasSerialDevice {
+                    Picker("", selection: $consoleMode) {
+                        Text("Display").tag("graphical")
+                        Text("Serial").tag("serial")
+                    }
+                    .labelsHidden().pickerStyle(.segmented).fixedSize()
+                    .padding(.vertical, 6)
+                }
                 ZStack { content }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .clipped()
@@ -96,6 +106,9 @@ struct ConsoleTab: View {
         if !domain.state.isActive {
             ContentUnavailableView("VM is not running", systemImage: "display",
                 description: Text("Start the VM to open its console."))
+        } else if showSerial {
+            SerialConsoleView(session: session, uuid: domain.uuid)
+                .id(domain.uuid)
         } else if spiceActive {
             spiceContent
         } else if vncActive {
@@ -106,7 +119,7 @@ struct ConsoleTab: View {
                 description: Text("Only VNC and SPICE consoles are supported."))
         } else if loaded, graphics == nil {
             ContentUnavailableView("No console", systemImage: "display.trianglebadge.exclamationmark",
-                description: Text(loadError ?? "This VM has no VNC or SPICE graphics device."))
+                description: Text(loadError ?? "This VM has no graphics or serial console device."))
         } else {
             overlay("Preparing console…")
         }
@@ -141,7 +154,13 @@ struct ConsoleTab: View {
     // MARK: - Shared chrome
 
     private var consoleConnected: Bool {
-        vnc.status == .connected || spice.status == .connected
+        vnc.status == .connected || spice.status == .connected || showSerial
+    }
+
+    /// Serial is shown for headless VMs automatically, or when the user picks
+    /// it on a VM that has both a display and a serial device.
+    private var showSerial: Bool {
+        hasSerialDevice && (graphics == nil || consoleMode == "serial")
     }
 
     private var taskKey: String { "\(domain.uuid)-\(domain.state.rawValue)" }
@@ -180,7 +199,11 @@ struct ConsoleTab: View {
         let g = cfg?.graphics
         graphics = g
         videoModel = cfg?.videoModel
+        hasSerialDevice = cfg?.deviceList().contains {
+            $0.kind == .serial || $0.kind == .console
+        } ?? false
         loaded = true
+        if showSerial { return }   // serial path needs no tunnel/VNC/SPICE
 
         // Already connecting or connected (e.g. returning to this tab) — leave it.
         if !force, consoleActive { return }

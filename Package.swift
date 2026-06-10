@@ -19,6 +19,11 @@ let package = Package(
             url: "https://github.com/royalapplications/royalvnc.git",
             revision: "60a92e1a60e928b29c16230598efd5a97c134139"
         ),
+        // Terminal emulator view for the serial console (MIT).
+        .package(
+            url: "https://github.com/migueldeicaza/SwiftTerm.git",
+            from: "1.13.0"
+        ),
     ],
     targets: [
         // C interop with the Homebrew libvirt library (resolved via pkg-config).
@@ -84,7 +89,8 @@ let package = Package(
         // The SwiftUI application.
         .executableTarget(
             name: "App",
-            dependencies: ["LibvirtKit", "DomainModel", "ConsoleKit", "SpiceKit"]
+            dependencies: ["LibvirtKit", "DomainModel", "ConsoleKit", "SpiceKit",
+                           .product(name: "SwiftTerm", package: "SwiftTerm")]
         ),
 
         .testTarget(
