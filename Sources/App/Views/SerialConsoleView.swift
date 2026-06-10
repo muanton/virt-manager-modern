@@ -33,6 +33,7 @@ struct SerialConsoleView: NSViewRepresentable {
         private let uuid: String
         private weak var terminal: TerminalView?
         private var handle: SerialConsoleHandle?
+        private var receivedAny = false
 
         init(session: ConnectionSession, uuid: String) {
             self.session = session
@@ -43,6 +44,7 @@ struct SerialConsoleView: NSViewRepresentable {
             terminal = tv
             tv.feed(text: "Connecting to console…\r\n")
             Task { await connect() }
+            DispatchQueue.main.async { tv.window?.makeFirstResponder(tv) }
         }
 
         private func connect() async {
@@ -50,6 +52,7 @@ struct SerialConsoleView: NSViewRepresentable {
                 uuid: uuid,
                 onData: { [weak self] data in
                     Task { @MainActor [weak self] in
+                        self?.receivedAny = true
                         self?.terminal?.feed(byteArray: ArraySlice([UInt8](data)))
                     }
                 },
@@ -63,8 +66,19 @@ struct SerialConsoleView: NSViewRepresentable {
             if handle == nil {
                 terminal?.feed(text: "\r\n[\(session.lastError ?? "failed to open console")]\r\n")
             } else {
+                terminal?.feed(text: "[connected — keystrokes go to the guest]\r\n")
                 // A nudge so the guest reprints its login prompt.
                 handle?.send(Data("\r".utf8))
+                // A silent port usually means the guest runs no serial getty —
+                // say so instead of leaving a black screen.
+                Task { @MainActor [weak self] in
+                    try? await Task.sleep(for: .seconds(4))
+                    guard let self, self.handle != nil, !self.receivedAny else { return }
+                    self.terminal?.feed(text:
+                        "\r\n[no output from the guest — it likely runs no serial getty.\r\n" +
+                        " On Ubuntu/Debian: sudo systemctl enable --now serial-getty@ttyS0.service\r\n" +
+                        " Kernel messages appear here after a reboot if the guest boots with console=ttyS0.]\r\n")
+                }
             }
         }
 

@@ -148,6 +148,8 @@ public enum DomainTemplate {
             <channel type='unix'>
               <target type='virtio' name='org.qemu.guest_agent.0'/>
             </channel>
+            <serial type='pty'/>
+            <console type='pty'/>
             <input type='tablet' bus='usb'/>\(tpm)
             \(gfx)
             \(video)
