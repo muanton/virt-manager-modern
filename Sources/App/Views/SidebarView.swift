@@ -87,7 +87,7 @@ private struct SessionSection: View {
                     Text("No VMs").foregroundStyle(.secondary)
                 } else {
                     ForEach(session.domains) { domain in
-                        DomainRow(domain: domain)
+                        DomainRow(domain: domain, stats: session.stats[domain.uuid])
                             .tag(DomainSelection(sessionID: session.id, uuid: domain.uuid))
                             .contextMenu {
                                 Button("Delete \(domain.name)…", role: .destructive) {
@@ -155,6 +155,7 @@ private struct SessionSection: View {
 
 private struct DomainRow: View {
     let domain: DomainSummary
+    var stats: ConnectionSession.VMStats?
 
     var body: some View {
         HStack(spacing: 8) {
@@ -162,11 +163,18 @@ private struct DomainRow: View {
                 .foregroundStyle(domain.state.color)
             VStack(alignment: .leading, spacing: 1) {
                 Text(domain.name)
-                Text(domain.state.label)
+                Text(subtitle)
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                    .monospacedDigit()
             }
         }
         .padding(.vertical, 2)
+    }
+
+    private var subtitle: String {
+        guard domain.isActive, let s = stats else { return domain.state.label }
+        return String(format: "%@ · %.0f%% · %@", domain.state.label,
+                      s.cpuPercent, Format.memory(kiB: s.memUsedKiB))
     }
 }

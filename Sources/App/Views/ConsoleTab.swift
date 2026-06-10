@@ -36,16 +36,6 @@ struct ConsoleTab: View {
             .frame(width: geo.size.width, height: geo.size.height)
         }
         .task(id: taskKey) { await prepare() }
-        .toolbar {
-            if consoleActive {
-                ToolbarItem {
-                    Button { vnc.stop(); spice.stop() } label: {
-                        Label("Disconnect", systemImage: "stop.circle")
-                    }
-                    .help("Disconnect — close the console connection (the VM keeps running)")
-                }
-            }
-        }
     }
 
     // MARK: - QXL warning

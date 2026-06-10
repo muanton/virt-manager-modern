@@ -2,7 +2,11 @@ import SwiftUI
 import LibvirtKit
 
 struct OverviewTab: View {
+    @ObservedObject var session: ConnectionSession
     let domain: DomainSummary
+
+    @State private var ifaces: [IfaceAddr] = []
+    @State private var ifacesLoaded = false
 
     var body: some View {
         Form {
@@ -16,6 +20,57 @@ struct OverviewTab: View {
                 }
                 LabeledContent("Domain ID", value: domain.id >= 0 ? "\(domain.id)" : "—")
             }
+            if domain.isActive, let s = session.stats[domain.uuid] {
+                Section("Usage") {
+                    LabeledContent("CPU") {
+                        HStack(spacing: 8) {
+                            ProgressView(value: s.cpuPercent, total: 100).frame(width: 160)
+                            Text(String(format: "%.0f%%", s.cpuPercent))
+                                .monospacedDigit().frame(width: 44, alignment: .trailing)
+                        }
+                    }
+                    LabeledContent("Memory") {
+                        HStack(spacing: 8) {
+                            ProgressView(value: Double(min(s.memUsedKiB, s.memTotalKiB)),
+                                         total: Double(max(s.memTotalKiB, 1))).frame(width: 160)
+                            Text("\(Format.memory(kiB: s.memUsedKiB)) of \(Format.memory(kiB: s.memTotalKiB))")
+                                .monospacedDigit()
+                        }
+                    }
+                }
+            }
+            if domain.isActive {
+                Section("Network") {
+                    if !ifacesLoaded {
+                        ProgressView().controlSize(.small)
+                    } else if ifaces.isEmpty {
+                        Text("No addresses reported (guest agent not running, no DHCP lease).")
+                            .foregroundStyle(.secondary)
+                    } else {
+                        ForEach(ifaces) { iface in
+                            LabeledContent(iface.name) {
+                                VStack(alignment: .trailing, spacing: 2) {
+                                    ForEach(iface.addresses, id: \.self) { addr in
+                                        HStack(spacing: 6) {
+                                            Text(addr).monospaced().textSelection(.enabled)
+                                            Button {
+                                                let ip = String(addr.split(separator: "/")[0])
+                                                NSPasteboard.general.clearContents()
+                                                NSPasteboard.general.setString(ip, forType: .string)
+                                            } label: { Image(systemName: "doc.on.doc") }
+                                                .buttonStyle(.plain).foregroundStyle(.secondary)
+                                                .help("Copy IP address")
+                                        }
+                                    }
+                                    if let mac = iface.mac {
+                                        Text(mac).font(.caption).foregroundStyle(.secondary)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
             Section("Hardware") {
                 LabeledContent("vCPUs", value: "\(domain.vcpus)")
                 LabeledContent("Memory", value: Format.memory(kiB: domain.memoryKiB))
@@ -28,5 +83,15 @@ struct OverviewTab: View {
             }
         }
         .formStyle(.grouped)
+        .task(id: "\(domain.uuid)-\(domain.state.rawValue)") {
+            // Fetch IPs on appear and re-poll every 10 s while this tab is visible.
+            ifacesLoaded = false
+            while !Task.isCancelled {
+                guard domain.isActive else { ifaces = []; ifacesLoaded = true; return }
+                ifaces = await session.interfaceAddresses(uuid: domain.uuid)
+                ifacesLoaded = true
+                try? await Task.sleep(for: .seconds(10))
+            }
+        }
     }
 }

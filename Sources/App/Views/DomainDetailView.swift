@@ -31,7 +31,7 @@ struct DomainDetailView: View {
         Group {
             if let domain {
                 TabView(selection: $tab) {
-                    OverviewTab(domain: domain)
+                    OverviewTab(session: session, domain: domain)
                         .tabItem { Label("Overview", systemImage: "info.circle") }.tag(0)
                     ConsoleTab(session: session, domain: domain, vnc: vnc, spice: spice)
                         .tabItem { Label("Console", systemImage: "display") }.tag(1)

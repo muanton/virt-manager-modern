@@ -201,7 +201,7 @@ public final class LibvirtConnection: @unchecked Sendable {
     }
 
     /// Looks up a domain by UUID, runs `body`, and always frees the handle.
-    private static func withDomain<T>(
+    static func withDomain<T>(
         _ conn: OpaquePointer, uuid: String, _ body: (OpaquePointer) throws -> T
     ) throws -> T {
         guard let dom = virDomainLookupByUUIDString(conn, uuid) else {

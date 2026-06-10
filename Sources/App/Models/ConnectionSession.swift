@@ -18,7 +18,15 @@ final class ConnectionSession: ObservableObject, Identifiable {
 
     @Published private(set) var status: Status = .disconnected
     @Published private(set) var domains: [DomainSummary] = []
+    @Published private(set) var stats: [String: VMStats] = [:]   // uuid → live usage
     @Published var lastError: String?
+
+    struct VMStats {
+        var cpuPercent: Double
+        var memUsedKiB: UInt64
+        var memTotalKiB: UInt64
+    }
+    private var lastCPUSamples: [String: (timeNs: UInt64, at: Date)] = [:]
 
     // Host resources for the hardware forms (loaded lazily, cached).
     @Published private(set) var networks: [VirtNetwork] = []
@@ -68,6 +76,40 @@ final class ConnectionSession: ObservableObject, Identifiable {
         } catch {
             lastError = error.localizedDescription
         }
+        await refreshStats()
+    }
+
+    /// CPU % + memory per running VM, derived from the bulk stats call.
+    /// CPU % = guest cpu_time delta / (wall-clock delta × vCPUs).
+    private func refreshStats() async {
+        guard let conn, let raw = try? await conn.allDomainStats() else { return }
+        let now = Date()
+        var next: [String: VMStats] = [:]
+        for (uuid, s) in raw {
+            var cpu: Double = 0
+            if let prev = lastCPUSamples[uuid], s.cpuTimeNs >= prev.timeNs {
+                let elapsed = now.timeIntervalSince(prev.at)
+                let vcpus = max(1, s.vcpuCount)
+                if elapsed > 0.2 {
+                    cpu = Double(s.cpuTimeNs - prev.timeNs) / (elapsed * 1e9 * Double(vcpus)) * 100
+                    cpu = min(100, max(0, cpu))
+                } else {
+                    cpu = stats[uuid]?.cpuPercent ?? 0
+                }
+            }
+            lastCPUSamples[uuid] = (s.cpuTimeNs, now)
+            next[uuid] = VMStats(cpuPercent: cpu,
+                                 memUsedKiB: s.balloonRSSKiB,
+                                 memTotalKiB: s.balloonCurrentKiB)
+        }
+        stats = next
+        lastCPUSamples = lastCPUSamples.filter { next[$0.key] != nil }
+    }
+
+    /// Guest interface addresses (agent → DHCP-lease fallback). On-demand.
+    func interfaceAddresses(uuid: String) async -> [IfaceAddr] {
+        guard let conn else { return [] }
+        return (try? await conn.interfaceAddresses(uuid: uuid)) ?? []
     }
 
     func perform(_ action: DomainAction, on uuid: String) async {
