@@ -1,0 +1,5 @@
+module CLibvirt [system] {
+    umbrella header "shim.h"
+    link "virt"
+    export *
+}

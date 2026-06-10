@@ -1,0 +1,8 @@
+.build/
+.swiftpm/
+third_party/
+VirtManagerModern.app/
+.DS_Store
+*.xcodeproj
+.idea/
+*.ips

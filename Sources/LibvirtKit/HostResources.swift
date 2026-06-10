@@ -1,0 +1,255 @@
+import CLibvirt
+import Foundation
+
+// MARK: - Value types
+
+public struct VirtNetwork: Identifiable, Sendable, Hashable {
+    public let name: String
+    public let bridge: String?
+    public let active: Bool
+    public var id: String { name }
+}
+
+public struct StorageVolume: Identifiable, Sendable, Hashable {
+    public let pool: String
+    public let name: String
+    public let path: String
+    public let capacityBytes: UInt64
+    public let format: String?
+    public var id: String { path }
+}
+
+public struct DomainCaps: Sendable, Hashable {
+    public let domainType: String   // kvm | qemu
+    public let emulator: String
+    public let arch: String
+    public let machine: String
+    public let firmwareEFI: Bool
+
+    public static let fallback = DomainCaps(
+        domainType: "kvm", emulator: "/usr/bin/qemu-system-x86_64",
+        arch: "x86_64", machine: "q35", firmwareEFI: true)
+}
+
+public enum NodeDeviceKind: String, Sendable, Hashable { case usb, pci }
+
+public struct NodeDevice: Identifiable, Sendable, Hashable {
+    public let id: String        // libvirt node-device name
+    public let kind: NodeDeviceKind
+    public let label: String
+    public let vendorID: String?
+    public let productID: String?
+    public let usbBus: Int?
+    public let usbDevice: Int?
+    public let pciDomain: Int?
+    public let pciBus: Int?
+    public let pciSlot: Int?
+    public let pciFunction: Int?
+
+    /// A `<hostdev>` element targeting this host device.
+    public func hostdevXML() -> String {
+        switch kind {
+        case .usb:
+            return """
+            <hostdev mode='subsystem' type='usb' managed='yes'>
+              <source>
+                <vendor id='\(vendorID ?? "0x0000")'/>
+                <product id='\(productID ?? "0x0000")'/>
+              </source>
+            </hostdev>
+            """
+        case .pci:
+            let d = String(format: "0x%04x", pciDomain ?? 0)
+            let b = String(format: "0x%02x", pciBus ?? 0)
+            let s = String(format: "0x%02x", pciSlot ?? 0)
+            let f = String(format: "0x%x", pciFunction ?? 0)
+            return """
+            <hostdev mode='subsystem' type='pci' managed='yes'>
+              <source>
+                <address domain='\(d)' bus='\(b)' slot='\(s)' function='\(f)'/>
+              </source>
+            </hostdev>
+            """
+        }
+    }
+}
+
+// MARK: - Queries
+
+extension LibvirtConnection {
+    public func listNetworks() async throws -> [VirtNetwork] {
+        try await run { conn in
+            var array: UnsafeMutablePointer<OpaquePointer?>?
+            let count = virConnectListAllNetworks(conn, &array, 0)
+            guard count >= 0, let array else {
+                throw LibvirtError.lastError(fallback: "Failed to list networks")
+            }
+            defer { free(array) }
+            var out: [VirtNetwork] = []
+            for i in 0..<Int(count) {
+                guard let net = array[i] else { continue }
+                defer { virNetworkFree(net) }
+                let name = virNetworkGetName(net).map { String(cString: $0) } ?? "?"
+                var bridge: String?
+                if let b = virNetworkGetBridgeName(net) { bridge = String(cString: b); free(b) }
+                out.append(VirtNetwork(name: name, bridge: bridge,
+                                       active: virNetworkIsActive(net) == 1))
+            }
+            return out.sorted { $0.name < $1.name }
+        }
+    }
+
+    public func listVolumes() async throws -> [StorageVolume] {
+        try await run { conn in
+            var pools: UnsafeMutablePointer<OpaquePointer?>?
+            let pcount = virConnectListAllStoragePools(conn, &pools, 0)
+            guard pcount >= 0, let pools else {
+                throw LibvirtError.lastError(fallback: "Failed to list storage pools")
+            }
+            defer { free(pools) }
+
+            var out: [StorageVolume] = []
+            for i in 0..<Int(pcount) {
+                guard let pool = pools[i] else { continue }
+                defer { virStoragePoolFree(pool) }
+                let poolName = virStoragePoolGetName(pool).map { String(cString: $0) } ?? "?"
+
+                var vols: UnsafeMutablePointer<OpaquePointer?>?
+                let vcount = virStoragePoolListAllVolumes(pool, &vols, 0)
+                guard vcount >= 0, let vols else { continue }
+                defer { free(vols) }
+                for j in 0..<Int(vcount) {
+                    guard let vol = vols[j] else { continue }
+                    defer { virStorageVolFree(vol) }
+                    let name = virStorageVolGetName(vol).map { String(cString: $0) } ?? "?"
+                    var path = ""
+                    if let p = virStorageVolGetPath(vol) { path = String(cString: p); free(p) }
+                    var info = virStorageVolInfo()
+                    let cap = virStorageVolGetInfo(vol, &info) == 0 ? UInt64(info.capacity) : 0
+                    var format: String?
+                    if let x = virStorageVolGetXMLDesc(vol, 0) {
+                        let xml = String(cString: x); free(x)
+                        format = Self.formatFromVolumeXML(xml)
+                    }
+                    out.append(StorageVolume(pool: poolName, name: name, path: path,
+                                             capacityBytes: cap, format: format))
+                }
+            }
+            return out.sorted { $0.name < $1.name }
+        }
+    }
+
+    public func createVolume(pool poolName: String, name: String,
+                             capacityBytes: UInt64, format: String) async throws -> StorageVolume {
+        try await run { conn in
+            guard let pool = virStoragePoolLookupByName(conn, poolName) else {
+                throw LibvirtError.lastError(fallback: "Storage pool not found")
+            }
+            defer { virStoragePoolFree(pool) }
+            let fileName = name.hasSuffix(".\(format)") || format == "raw" ? name : "\(name).\(format)"
+            let xml = """
+            <volume>
+              <name>\(fileName)</name>
+              <capacity unit='bytes'>\(capacityBytes)</capacity>
+              <target><format type='\(format)'/></target>
+            </volume>
+            """
+            guard let vol = virStorageVolCreateXML(pool, xml, 0) else {
+                throw LibvirtError.lastError(fallback: "Failed to create volume")
+            }
+            defer { virStorageVolFree(vol) }
+            var path = ""
+            if let p = virStorageVolGetPath(vol) { path = String(cString: p); free(p) }
+            return StorageVolume(pool: poolName, name: fileName, path: path,
+                                 capacityBytes: capacityBytes, format: format)
+        }
+    }
+
+    public func listNodeDevices(kind: NodeDeviceKind) async throws -> [NodeDevice] {
+        try await run { conn in
+            var array: UnsafeMutablePointer<OpaquePointer?>?
+            let count = virConnectListAllNodeDevices(conn, &array, 0)
+            guard count >= 0, let array else {
+                throw LibvirtError.lastError(fallback: "Failed to list host devices")
+            }
+            defer { free(array) }
+            var out: [NodeDevice] = []
+            for i in 0..<Int(count) {
+                guard let dev = array[i] else { continue }
+                defer { virNodeDeviceFree(dev) }
+                let name = virNodeDeviceGetName(dev).map { String(cString: $0) } ?? "?"
+                guard let x = virNodeDeviceGetXMLDesc(dev, 0) else { continue }
+                let xml = String(cString: x); free(x)
+                if let nd = Self.parseNodeDevice(name: name, xml: xml, kind: kind) {
+                    out.append(nd)
+                }
+            }
+            return out.sorted { $0.label < $1.label }
+        }
+    }
+
+    public func domainCapabilities() async throws -> DomainCaps {
+        try await run { conn in
+            guard let x = virConnectGetDomainCapabilities(conn, nil, nil, nil, nil, 0) else {
+                return DomainCaps.fallback
+            }
+            let xml = String(cString: x); free(x)
+            guard let doc = try? XMLDocument(xmlString: xml), let root = doc.rootElement() else {
+                return DomainCaps.fallback
+            }
+            func text(_ n: String) -> String? { root.elements(forName: n).first?.stringValue }
+            let firmwareEFI = root.elements(forName: "os").first?
+                .elements(forName: "enum").first(where: { $0.attribute(forName: "name")?.stringValue == "firmware" })?
+                .elements(forName: "value").contains { $0.stringValue == "efi" } ?? false
+            return DomainCaps(
+                domainType: text("domain") ?? "kvm",
+                emulator: text("path") ?? DomainCaps.fallback.emulator,
+                arch: text("arch") ?? "x86_64",
+                machine: "q35",
+                firmwareEFI: firmwareEFI)
+        }
+    }
+
+    // MARK: - XML parsing helpers
+
+    private static func formatFromVolumeXML(_ xml: String) -> String? {
+        guard let doc = try? XMLDocument(xmlString: xml),
+              let target = doc.rootElement()?.elements(forName: "target").first,
+              let fmt = target.elements(forName: "format").first?.attribute(forName: "type")?.stringValue
+        else { return nil }
+        return fmt
+    }
+
+    private static func parseNodeDevice(name: String, xml: String, kind: NodeDeviceKind) -> NodeDevice? {
+        guard let doc = try? XMLDocument(xmlString: xml),
+              let root = doc.rootElement() else { return nil }
+        let caps = root.elements(forName: "capability")
+        let wantType = (kind == .usb) ? "usb_device" : "pci"
+        guard let cap = caps.first(where: { $0.attribute(forName: "type")?.stringValue == wantType })
+        else { return nil }
+
+        func text(_ n: String) -> String? { cap.elements(forName: n).first?.stringValue }
+        func int(_ n: String) -> Int? { text(n).flatMap(Int.init) }
+        let product = cap.elements(forName: "product").first?.stringValue
+        let vendor = cap.elements(forName: "vendor").first?.stringValue
+        let vendorID = cap.elements(forName: "vendor").first?.attribute(forName: "id")?.stringValue
+        let productID = cap.elements(forName: "product").first?.attribute(forName: "id")?.stringValue
+
+        let label = [vendor, product].compactMap { $0 }.joined(separator: " ").isEmpty
+            ? name : [vendor, product].compactMap { $0 }.joined(separator: " ")
+
+        if kind == .usb {
+            // Skip hubs / root devices with no usable product id.
+            return NodeDevice(id: name, kind: .usb, label: label,
+                              vendorID: vendorID, productID: productID,
+                              usbBus: int("bus"), usbDevice: int("device"),
+                              pciDomain: nil, pciBus: nil, pciSlot: nil, pciFunction: nil)
+        } else {
+            return NodeDevice(id: name, kind: .pci, label: label,
+                              vendorID: vendorID, productID: productID,
+                              usbBus: nil, usbDevice: nil,
+                              pciDomain: int("domain"), pciBus: int("bus"),
+                              pciSlot: int("slot"), pciFunction: int("function"))
+        }
+    }
+}

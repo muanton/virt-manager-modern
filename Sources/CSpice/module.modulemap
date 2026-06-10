@@ -1,0 +1,4 @@
+module CSpice [system] {
+    umbrella header "umbrella.h"
+    export *
+}

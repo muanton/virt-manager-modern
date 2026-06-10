@@ -1,0 +1,14 @@
+{
+  "originHash" : "fd778051892110c857f9a2922992a97c345b3db53e80aa6baecbf2f21bd7d259",
+  "pins" : [
+    {
+      "identity" : "royalvnc",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/royalapplications/royalvnc.git",
+      "state" : {
+        "revision" : "60a92e1a60e928b29c16230598efd5a97c134139"
+      }
+    }
+  ],
+  "version" : 3
+}
