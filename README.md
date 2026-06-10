@@ -12,6 +12,53 @@ consoles rendered natively in the window.
 |---|---|---|
 | ![Console](docs/screenshots/console.png) | ![Hardware](docs/screenshots/hardware.png) | ![New VM](docs/screenshots/new-vm.png) |
 
+## Why
+
+Running the original virt-manager on macOS is a rough ride: it's a GTK app
+glued on with Homebrew, so you get non-native menus and shortcuts, blurry
+HiDPI rendering, sluggish remote consoles, and a dependency stack that breaks
+on the next `brew upgrade`. It works — barely — but it never feels like a Mac
+app, because it isn't one.
+
+This project is that itch, scratched: a from-scratch SwiftUI client for the
+same libvirt/QEMU hosts, with consoles, hardware editing, snapshots, and
+storage handled natively.
+
+### Compared to original virt-manager
+
+**Where this app is better on a Mac:**
+
+- Native SwiftUI app — real macOS toolbar, shortcuts, trackpad, Retina
+  rendering; no GTK/XQuartz anywhere in the stack.
+- Self-contained `.app`: every library is built from pinned upstream sources
+  and bundled. No Homebrew at runtime, nothing to break on a system update.
+- SSH tunnels for SPICE/VNC are created automatically per console.
+- Quality-of-life extras virt-manager lacks: **ISO upload from your Mac** over
+  libvirt streams (no scp), guest IPs with one-click copy, live CPU/memory
+  stats in the VM list, guard rails in hardware editing (controllers in use
+  can't be removed, duplicate singletons can't be added), automatic installer
+  ISO eject on power actions.
+
+**Where original virt-manager still wins:**
+
+- Maturity: ~20 years of edge cases; this app is young.
+- Breadth: host network/storage-pool editing, migration between hosts,
+  multiple hypervisor drivers (Xen, LXC, …), unattended installs backed by the
+  full libosinfo database (this app ships a curated OS catalog instead).
+- Console extras: audio, USB redirection, and clipboard sharing in SPICE.
+- Cross-platform and packaged by every Linux distribution; this app is
+  macOS-14+/Apple-Silicon only.
+
+## About this project
+
+This entire application — the Swift/SwiftUI code, the C interop shims for
+libvirt and spice-gtk, the from-source dependency build system, the docs, and
+the screenshots — was built end-to-end by **Anthropic's Claude (Fable 5)**
+working as a coding agent, in conversation with a human who steered, tested
+against real hardware, and reviewed. It stands as a demonstration of what
+current Claude models can build autonomously: a working native client speaking
+a 20-year-old C virtualization API, with its own reproducible toolchain.
+
 ## Features
 
 - **Connections** to remote libvirt over `qemu+ssh://` (SSH keys / ssh-agent),
