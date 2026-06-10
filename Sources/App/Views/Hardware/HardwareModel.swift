@@ -84,6 +84,65 @@ final class HardwareModel: ObservableObject {
         }
     }
 
+    var isRunning: Bool { session.domain(uuid: uuid)?.isActive == true }
+
+    /// Whether a device kind supports live attach/detach under QEMU.
+    static func isHotpluggable(_ kind: DeviceKind) -> Bool {
+        switch kind {
+        case .disk, .cdrom, .interface, .hostdev, .redirdev: return true
+        default: return false
+        }
+    }
+
+    /// Live-attach a new device (also persisted). Reloads on success.
+    func attachDeviceLive(xml: String) async -> Bool {
+        applying = true
+        defer { applying = false }
+        if await session.attachDevice(uuid: uuid, xml: xml, live: true, persistent: true) {
+            await load()
+            applyMessage = "Device attached to the running VM."
+            return true
+        }
+        applyMessage = session.lastError ?? "Live attach failed."
+        return false
+    }
+
+    /// Live-detach an existing device (also removed from the config).
+    func detachDeviceLive(id: String) async -> Bool {
+        guard let xml = config?.deviceXML(id: id) else { return false }
+        applying = true
+        defer { applying = false }
+        if await session.detachDevice(uuid: uuid, xml: xml, live: true, persistent: true) {
+            await load()
+            applyMessage = "Device detached from the running VM."
+            return true
+        }
+        applyMessage = session.lastError ?? "Live detach failed."
+        return false
+    }
+
+    func applyVcpusLive(_ count: Int) async {
+        applying = true
+        defer { applying = false }
+        if await session.setVcpusLive(uuid: uuid, count: count) {
+            await load()
+            applyMessage = "vCPU count changed on the running VM."
+        } else {
+            applyMessage = session.lastError ?? "Live vCPU change failed."
+        }
+    }
+
+    func applyMemoryLive(currentMiB: Double) async {
+        applying = true
+        defer { applying = false }
+        if await session.setMemoryLive(uuid: uuid, kib: UInt64(max(0, currentMiB) * 1024)) {
+            await load()
+            applyMessage = "Memory changed on the running VM."
+        } else {
+            applyMessage = session.lastError ?? "Live memory change failed."
+        }
+    }
+
     // Add-rule queries (forwarded from the working copy so staged edits count).
     func addBlockReason(for kind: DeviceKind) -> String? { config?.addBlockReason(for: kind) }
     var graphicsTypes: Set<String> { config?.graphicsTypes ?? [] }

@@ -19,6 +19,7 @@ struct AddHardwareSheet: View {
     @State private var category: Category = .disk
     @State private var working = false
     @State private var showingUpload = false
+    @State private var liveAttach = true
     @State private var error: String?
 
     // Storage
@@ -73,6 +74,15 @@ struct AddHardwareSheet: View {
                         }
                     }
                     form
+                    if hotpluggable {
+                        Section {
+                            Toggle("Attach now (live)", isOn: $liveAttach)
+                            Text(liveAttach
+                                 ? "The device is plugged into the running VM immediately and kept after restarts."
+                                 : "The device is staged — Apply Changes saves it for the next boot.")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
+                    }
                 }.formStyle(.grouped)
                 if let error { Text(error).foregroundStyle(.red).font(.caption).padding(.horizontal) }
                 Divider()
@@ -236,14 +246,27 @@ struct AddHardwareSheet: View {
         }
     }
 
+    private var hotpluggable: Bool {
+        guard model.isRunning else { return false }
+        switch category {
+        case .disk, .cdrom, .network, .usbhost, .usbredir: return true
+        default: return false
+        }
+    }
+
     private func add() {
         working = true
         Task {
             defer { working = false }
             do {
                 let xml = try await buildXML()
-                model.addDevice(xml: xml)
-                dismiss()
+                if hotpluggable && liveAttach {
+                    if await model.attachDeviceLive(xml: xml) { dismiss() }
+                    else { error = model.applyMessage }
+                } else {
+                    model.addDevice(xml: xml)
+                    dismiss()
+                }
             } catch {
                 self.error = error.localizedDescription
             }

@@ -47,10 +47,22 @@ struct HardwareTab: View {
             titleVisibility: .visible,
             presenting: confirmRemove
         ) { d in
-            Button("Remove \(d.title)", role: .destructive) {
-                model.removeDevice(id: d.id)
-                selection = .general
-                confirmRemove = nil
+            if model.isRunning && HardwareModel.isHotpluggable(d.kind) {
+                Button("Detach Now (live)", role: .destructive) {
+                    Task { if await model.detachDeviceLive(id: d.id) { selection = .general } }
+                    confirmRemove = nil
+                }
+                Button("Remove After Restart", role: .destructive) {
+                    model.removeDevice(id: d.id)
+                    selection = .general
+                    confirmRemove = nil
+                }
+            } else {
+                Button("Remove \(d.title)", role: .destructive) {
+                    model.removeDevice(id: d.id)
+                    selection = .general
+                    confirmRemove = nil
+                }
             }
         } message: { d in
             Text(removeMessage(d))

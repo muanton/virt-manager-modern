@@ -81,6 +81,13 @@ struct CPUsEditor: View {
                     if clamped != n { vcpu = clamped }
                     if clamped != model.vcpu { model.setCPU(clamped) }
                 }
+                if model.isRunning {
+                    Button("Apply to Running VM") {
+                        Task { await model.applyVcpusLive(vcpu) }
+                    }
+                    .disabled(model.applying)
+                    .help("Change the vCPU count live (within the configured maximum)")
+                }
             }
             Section("Configuration") {
                 Picker("Mode", selection: $mode) {
@@ -138,6 +145,13 @@ struct MemoryEditor: View {
                     MemoryAmountField(mib: $maximum, unit: $unit) { stage() }
                 }
                 Button("Update Memory") { stage() }
+                if model.isRunning {
+                    Button("Apply to Running VM") {
+                        Task { await model.applyMemoryLive(currentMiB: current) }
+                    }
+                    .disabled(model.applying)
+                    .help("Resize the guest's memory balloon live (up to the configured maximum)")
+                }
             }
             Section { StagedNote() }
         }

@@ -164,6 +164,32 @@ final class ConnectionSession: ObservableObject, Identifiable {
         catch { lastError = error.localizedDescription; return nil }
     }
 
+    // MARK: - Live hotplug / resize
+
+    func attachDevice(uuid: String, xml: String, live: Bool, persistent: Bool) async -> Bool {
+        guard let conn else { return false }
+        do { try await conn.attachDevice(uuid: uuid, deviceXML: xml, live: live, persistent: persistent); return true }
+        catch { lastError = error.localizedDescription; return false }
+    }
+
+    func detachDevice(uuid: String, xml: String, live: Bool, persistent: Bool) async -> Bool {
+        guard let conn else { return false }
+        do { try await conn.detachDevice(uuid: uuid, deviceXML: xml, live: live, persistent: persistent); return true }
+        catch { lastError = error.localizedDescription; return false }
+    }
+
+    func setVcpusLive(uuid: String, count: Int) async -> Bool {
+        guard let conn else { return false }
+        do { try await conn.setVcpusLive(uuid: uuid, count: count); await refresh(); return true }
+        catch { lastError = error.localizedDescription; return false }
+    }
+
+    func setMemoryLive(uuid: String, kib: UInt64) async -> Bool {
+        guard let conn else { return false }
+        do { try await conn.setMemoryLive(uuid: uuid, kib: kib); await refresh(); return true }
+        catch { lastError = error.localizedDescription; return false }
+    }
+
     // MARK: - Snapshots
 
     func snapshots(uuid: String) async -> [Snapshot]? {

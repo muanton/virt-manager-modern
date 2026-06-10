@@ -34,8 +34,19 @@ consoles rendered natively in the window.
   running VMs, and full metadata cleanup (UEFI NVRAM, managed save, snapshots).
 - **SPICE and VNC consoles**, both tunnelled automatically over SSH and
   rendered natively (no GTK). The Console tab picks the right protocol from the
-  VM's `<graphics>` device. CD-ROM media can be ejected live; power actions
-  auto-eject installers so they don't boot again.
+  VM's `<graphics>` device — and falls back to a real **serial console**
+  (terminal emulator over `virDomainOpenConsole`) for headless VMs. CD-ROM
+  media can be ejected live; power actions auto-eject installers so they
+  don't boot again.
+- **Live stats & guest IPs**: CPU% and memory per running VM in the sidebar
+  and Overview; guest IP addresses (guest agent or DHCP leases) with one-click
+  copy.
+- **Snapshots**: create (incl. memory while running), revert, delete — shown
+  as a tree with the current marker.
+- **Clone VM** with per-disk Clone/Share/Skip, and **ISO upload** from the Mac
+  straight into a host storage pool (libvirt streams — no scp).
+- **Live hotplug**: attach disks/NICs/USB devices to running VMs, detach them
+  live, and resize vCPUs/memory without a restart.
 
 ## Requirements
 

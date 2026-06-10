@@ -122,6 +122,62 @@ public final class LibvirtConnection: @unchecked Sendable {
         }
     }
 
+    /// Attaches a new device. `live` plugs it into the running guest;
+    /// `persistent` adds it to the stored config.
+    public func attachDevice(uuid: String, deviceXML: String,
+                             live: Bool, persistent: Bool) async throws {
+        try await run { conn in
+            try Self.withDomain(conn, uuid: uuid) { dom in
+                var flags: UInt32 = 0
+                if live { flags |= VIR_DOMAIN_DEVICE_MODIFY_LIVE.rawValue }
+                if persistent { flags |= VIR_DOMAIN_DEVICE_MODIFY_CONFIG.rawValue }
+                guard virDomainAttachDeviceFlags(dom, deviceXML, flags) == 0 else {
+                    throw LibvirtError.lastError(fallback: "Failed to attach device")
+                }
+            }
+        }
+    }
+
+    /// Detaches a device (matched by target/address from the XML).
+    public func detachDevice(uuid: String, deviceXML: String,
+                             live: Bool, persistent: Bool) async throws {
+        try await run { conn in
+            try Self.withDomain(conn, uuid: uuid) { dom in
+                var flags: UInt32 = 0
+                if live { flags |= VIR_DOMAIN_DEVICE_MODIFY_LIVE.rawValue }
+                if persistent { flags |= VIR_DOMAIN_DEVICE_MODIFY_CONFIG.rawValue }
+                guard virDomainDetachDeviceFlags(dom, deviceXML, flags) == 0 else {
+                    throw LibvirtError.lastError(fallback: "Failed to detach device")
+                }
+            }
+        }
+    }
+
+    /// Changes the vCPU count on the running guest (and the config).
+    public func setVcpusLive(uuid: String, count: Int) async throws {
+        try await run { conn in
+            try Self.withDomain(conn, uuid: uuid) { dom in
+                let flags = VIR_DOMAIN_AFFECT_LIVE.rawValue | VIR_DOMAIN_AFFECT_CONFIG.rawValue
+                guard virDomainSetVcpusFlags(dom, UInt32(count), flags) == 0 else {
+                    throw LibvirtError.lastError(fallback: "Failed to set vCPUs")
+                }
+            }
+        }
+    }
+
+    /// Changes the guest's memory balloon on the running guest (and config).
+    /// Bounded by the domain's maximum memory.
+    public func setMemoryLive(uuid: String, kib: UInt64) async throws {
+        try await run { conn in
+            try Self.withDomain(conn, uuid: uuid) { dom in
+                let flags = VIR_DOMAIN_AFFECT_LIVE.rawValue | VIR_DOMAIN_AFFECT_CONFIG.rawValue
+                guard virDomainSetMemoryFlags(dom, UInt(kib), flags) == 0 else {
+                    throw LibvirtError.lastError(fallback: "Failed to set memory")
+                }
+            }
+        }
+    }
+
     // MARK: - Autostart
 
     public func autostart(uuid: String) async throws -> Bool {
