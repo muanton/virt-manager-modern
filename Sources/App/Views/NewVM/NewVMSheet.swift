@@ -290,7 +290,7 @@ struct NewVMSheet: View {
                     Picker("", selection: binding) {
                         Text("Select…").tag("")
                         ForEach(volumes) { Text($0.name).tag($0.path) }
-                    }.labelsHidden().fixedSize().frame(width: 240, alignment: .leading)
+                    }.labelsHidden().frame(width: 220)
                     Button("Upload ISO…") { showingUpload = true }
                         .help("Upload an ISO from this Mac to the host")
                 }
