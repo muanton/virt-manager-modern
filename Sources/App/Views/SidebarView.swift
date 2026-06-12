@@ -84,21 +84,17 @@ private struct SessionSection: View {
                 }
                 .buttonStyle(.plain)
                 .foregroundStyle(.secondary)
+            case .reconnecting:
+                // Keep the last-known VM list visible (stale but stable) so the
+                // selection and detail view don't blank out while we retry.
+                Label("Connection lost — reconnecting…", systemImage: "arrow.triangle.2.circlepath")
+                    .foregroundStyle(.secondary)
+                domainRows
             case .connected:
                 if session.domains.isEmpty {
                     Text("No VMs").foregroundStyle(.secondary)
                 } else {
-                    ForEach(session.domains) { domain in
-                        DomainRow(domain: domain, stats: session.stats[domain.uuid])
-                            .tag(DomainSelection(sessionID: session.id, uuid: domain.uuid))
-                            .contextMenu {
-                                Button("Clone \(domain.name)…") { onCloneVM(session, domain) }
-                                Divider()
-                                Button("Delete \(domain.name)…", role: .destructive) {
-                                    onDeleteVM(session, domain)
-                                }
-                            }
-                    }
+                    domainRows
                 }
             }
         } header: {
@@ -121,11 +117,25 @@ private struct SessionSection: View {
         .contextMenu { contextMenu }
     }
 
+    @ViewBuilder private var domainRows: some View {
+        ForEach(session.domains) { domain in
+            DomainRow(domain: domain, stats: session.stats[domain.uuid])
+                .tag(DomainSelection(sessionID: session.id, uuid: domain.uuid))
+                .contextMenu {
+                    Button("Clone \(domain.name)…") { onCloneVM(session, domain) }
+                    Divider()
+                    Button("Delete \(domain.name)…", role: .destructive) {
+                        onDeleteVM(session, domain)
+                    }
+                }
+        }
+    }
+
     @ViewBuilder private var statusDot: some View {
         switch session.status {
         case .connected:
             Image(systemName: "circle.fill").font(.system(size: 6)).foregroundStyle(.green)
-        case .connecting:
+        case .connecting, .reconnecting:
             Image(systemName: "circle.fill").font(.system(size: 6)).foregroundStyle(.yellow)
         case .failed:
             Image(systemName: "circle.fill").font(.system(size: 6)).foregroundStyle(.red)

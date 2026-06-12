@@ -10,6 +10,9 @@ final class ConnectionSession: ObservableObject, Identifiable {
         case disconnected
         case connecting
         case connected
+        /// The transport died (SSH drop, libvirtd restart); the poll loop is
+        /// trying to open a fresh connection every few seconds.
+        case reconnecting
         case failed(String)
     }
 
@@ -74,9 +77,35 @@ final class ConnectionSession: ObservableObject, Identifiable {
         do {
             domains = try await conn.listDomains()
         } catch {
-            lastError = error.localizedDescription
+            // The background poll lands here every few seconds, so never raise
+            // the modal alert from a refresh — a dead transport would re-show
+            // the same error forever. Check the socket and auto-reconnect
+            // instead; user-initiated operations report their own errors.
+            if await !conn.isAlive() { beginReconnect() }
+            return
         }
         await refreshStats()
+    }
+
+    /// Tears down a dead connection and flips to `.reconnecting`; the poll
+    /// loop keeps retrying `attemptReconnect()` until the host is back.
+    private func beginReconnect() {
+        guard status == .connected, let dead = conn else { return }
+        dead.close()
+        conn = nil
+        stats = [:]
+        lastCPUSamples = [:]
+        status = .reconnecting
+    }
+
+    private func attemptReconnect() async {
+        guard conn == nil, status == .reconnecting else { return }
+        guard let c = try? await LibvirtConnection.open(uri: config.uri) else { return }
+        conn = c
+        status = .connected
+        lastError = nil
+        hostResourcesLoaded = false   // pools/volumes may have changed while away
+        await refresh()
     }
 
     /// CPU % + memory per running VM, derived from the bulk stats call.
@@ -387,7 +416,12 @@ final class ConnectionSession: ObservableObject, Identifiable {
             while !Task.isCancelled {
                 try? await Task.sleep(for: .seconds(3))
                 if Task.isCancelled { break }
-                await self?.refresh()
+                guard let self else { break }
+                if self.status == .reconnecting {
+                    await self.attemptReconnect()
+                } else {
+                    await self.refresh()
+                }
             }
         }
     }

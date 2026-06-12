@@ -56,6 +56,17 @@ public final class LibvirtConnection: @unchecked Sendable {
         }
     }
 
+    /// Whether the underlying transport (unix socket / SSH tunnel) is still
+    /// usable. Once this returns false the handle never recovers — the only
+    /// remedy is to open a new connection.
+    public func isAlive() async -> Bool {
+        await withCheckedContinuation { cont in
+            queue.async {
+                cont.resume(returning: virConnectIsAlive(self.conn) == 1)
+            }
+        }
+    }
+
     // MARK: - Listing
 
     /// Lists all domains (active and inactive) with a snapshot of their state.
