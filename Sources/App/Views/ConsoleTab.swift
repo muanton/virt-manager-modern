@@ -81,9 +81,11 @@ struct ConsoleTab: View {
     private func detachConsole() {
         let view = spice.displayView ?? vnc.framebufferView
         guard let view else { return }
-        detach.detach(view: view, title: "\(domain.name) — Console") {
-            if view === self.vnc.framebufferView {
-                self.vnc.refreshDisplay()
+        detach.detach(view: view, title: "\(domain.name) — Console") { [vnc, spice] in
+            if view === vnc.framebufferView {
+                vnc.refreshDisplay()
+            } else if view === spice.displayView, let spiceView = view as? SpiceDisplayView {
+                spiceView.refreshDisplay()
             }
         }
     }

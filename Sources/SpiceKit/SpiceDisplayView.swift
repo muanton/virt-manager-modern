@@ -40,11 +40,13 @@ public final class SpiceDisplayView: NSView {
     public func refreshDisplay() {
         wantsLayer = true
         guard let layer else { return }
+        layer.frame = bounds
         layer.backgroundColor = NSColor.black.cgColor
         layer.isOpaque = true
         layer.masksToBounds = true
         if let window {
-            layer.contentsScale = window.backingScaleFactor
+            let scale = window.screen?.backingScaleFactor ?? window.backingScaleFactor
+            layer.contentsScale = scale
         }
         guard fbWidth > 0, fbHeight > 0, bounds.width > 0, bounds.height > 0 else {
             layer.contents = nil

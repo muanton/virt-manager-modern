@@ -12,8 +12,10 @@ extension VNCCAFramebufferView {
     /// Re-applies layer scaling when Auto Layout resizes the view (bypasses `frame` setter).
     func refreshDisplayAfterResize() {
         guard settings.isScalingEnabled, let layer else { return }
+        layer.frame = bounds
         if let window {
-            layer.contentsScale = window.backingScaleFactor
+            let scale = window.screen?.backingScaleFactor ?? window.backingScaleFactor
+            layer.contentsScale = scale
         }
         let size = bounds.size
         if size.width >= framebufferSize.width, size.height >= framebufferSize.height {

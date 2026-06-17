@@ -10,7 +10,7 @@ final class ConsoleDetachController: NSObject, ObservableObject, NSWindowDelegat
 
     private var window: NSWindow?
     private weak var consoleView: NSView?
-    private weak var container: ConsoleDetachContainerView?
+    private weak var host: ConsoleDetachHostView?
     private weak var placeholder: NSView?
     private var constraints: [NSLayoutConstraint] = []
     private var extraRefresh: (() -> Void)?
@@ -48,12 +48,18 @@ final class ConsoleDetachController: NSObject, ObservableObject, NSWindowDelegat
         w.backgroundColor = .black
         w.collectionBehavior = [.fullScreenPrimary, .managed]
 
-        let box = ConsoleDetachContainerView(frame: w.contentView?.bounds ?? .zero)
+        // Keep the window's default content view — replacing it breaks fullscreen/zoom sizing.
+        guard let root = w.contentView else { return }
+        root.wantsLayer = true
+        root.layer?.backgroundColor = NSColor.black.cgColor
+        root.autoresizesSubviews = true
+
+        let box = ConsoleDetachHostView(frame: root.bounds)
         box.autoresizingMask = [.width, .height]
         box.consoleView = view
         box.onLayout = { [weak self] in self?.refreshConsoleView() }
-        w.contentView = box
-        container = box
+        root.addSubview(box)
+        host = box
 
         view.translatesAutoresizingMaskIntoConstraints = true
         view.autoresizingMask = [.width, .height]
@@ -74,9 +80,10 @@ final class ConsoleDetachController: NSObject, ObservableObject, NSWindowDelegat
             return
         }
         view.removeFromSuperview()
+        host?.removeFromSuperview()
         ph.removeFromSuperview()
         placeholder = nil
-        container = nil
+        host = nil
         extraRefresh = nil
 
         parent.addSubview(view)
@@ -95,6 +102,7 @@ final class ConsoleDetachController: NSObject, ObservableObject, NSWindowDelegat
 
     func toggleFullscreen() {
         window?.toggleFullScreen(nil)
+        scheduleRefreshes()
     }
 
     func windowWillClose(_ notification: Notification) {
@@ -102,8 +110,15 @@ final class ConsoleDetachController: NSObject, ObservableObject, NSWindowDelegat
     }
 
     func windowDidResize(_ notification: Notification) {
-        layoutConsoleView()
-        refreshConsoleView()
+        scheduleRefreshes()
+    }
+
+    func windowDidEndLiveResize(_ notification: Notification) {
+        scheduleRefreshes()
+    }
+
+    func windowDidChangeScreen(_ notification: Notification) {
+        scheduleRefreshes()
     }
 
     func windowDidEnterFullScreen(_ notification: Notification) {
@@ -115,10 +130,12 @@ final class ConsoleDetachController: NSObject, ObservableObject, NSWindowDelegat
     }
 
     private func layoutConsoleView() {
-        guard let view = consoleView, let box = container ?? window?.contentView as? ConsoleDetachContainerView else {
-            return
+        guard let view = consoleView, let box = host, let root = box.superview else { return }
+        let target = root.bounds
+        if box.frame != target {
+            box.frame = target
         }
-        if view.frame.size != box.bounds.size || view.frame.origin != box.bounds.origin {
+        if view.frame != box.bounds {
             view.frame = box.bounds
         }
     }
@@ -134,9 +151,9 @@ final class ConsoleDetachController: NSObject, ObservableObject, NSWindowDelegat
         }
     }
 
-    /// Fullscreen animation finishes asynchronously; refresh a few times to catch final bounds.
+    /// Zoom and fullscreen animations settle asynchronously; refresh repeatedly to catch final bounds.
     private func scheduleRefreshes() {
-        for delay in [0.0, 0.05, 0.15, 0.35] {
+        for delay in [0.0, 0.05, 0.15, 0.35, 0.6, 1.0] {
             DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
                 self?.refreshConsoleView()
             }
@@ -151,21 +168,32 @@ final class ConsoleDetachController: NSObject, ObservableObject, NSWindowDelegat
     }
 }
 
-/// Fills the detached window and keeps the console subview sized on layout / fullscreen.
-private final class ConsoleDetachContainerView: NSView {
+/// Hosts the console view inside the window's default content view (not as contentView itself).
+private final class ConsoleDetachHostView: NSView {
     weak var consoleView: NSView?
     var onLayout: (() -> Void)?
 
+    override func setFrameSize(_ newSize: NSSize) {
+        super.setFrameSize(newSize)
+        pinConsole()
+    }
+
+    override func setBoundsSize(_ newSize: NSSize) {
+        super.setBoundsSize(newSize)
+        pinConsole()
+    }
+
     override func layout() {
         super.layout()
-        if let consoleView {
-            consoleView.frame = bounds
-        }
-        onLayout?()
+        pinConsole()
     }
 
     override func resizeSubviews(withOldSize oldSize: NSSize) {
         super.resizeSubviews(withOldSize: oldSize)
+        pinConsole()
+    }
+
+    private func pinConsole() {
         if let consoleView {
             consoleView.frame = bounds
         }
