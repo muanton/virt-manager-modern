@@ -10,6 +10,15 @@ public struct VirtNetwork: Identifiable, Sendable, Hashable {
     public var id: String { name }
 }
 
+public struct StoragePoolInfo: Identifiable, Sendable, Hashable {
+    public let name: String
+    public let active: Bool
+    public let capacityBytes: UInt64
+    public let allocationBytes: UInt64
+    public let availableBytes: UInt64
+    public var id: String { name }
+}
+
 public struct StorageVolume: Identifiable, Sendable, Hashable {
     public let pool: String
     public let name: String
@@ -96,6 +105,64 @@ extension LibvirtConnection {
                                        active: virNetworkIsActive(net) == 1))
             }
             return out.sorted { $0.name < $1.name }
+        }
+    }
+
+    public func listStoragePools() async throws -> [StoragePoolInfo] {
+        try await run { conn in
+            var pools: UnsafeMutablePointer<OpaquePointer?>?
+            let count = virConnectListAllStoragePools(conn, &pools, 0)
+            guard count >= 0, let pools else {
+                throw LibvirtError.lastError(fallback: "Failed to list storage pools")
+            }
+            defer { free(pools) }
+
+            var out: [StoragePoolInfo] = []
+            for i in 0..<Int(count) {
+                guard let pool = pools[i] else { continue }
+                defer { virStoragePoolFree(pool) }
+                let name = virStoragePoolGetName(pool).map { String(cString: $0) } ?? "?"
+                var info = virStoragePoolInfo()
+                let ok = virStoragePoolGetInfo(pool, &info) == 0
+                out.append(StoragePoolInfo(
+                    name: name,
+                    active: virStoragePoolIsActive(pool) == 1,
+                    capacityBytes: ok ? UInt64(info.capacity) : 0,
+                    allocationBytes: ok ? UInt64(info.allocation) : 0,
+                    availableBytes: ok ? UInt64(info.available) : 0))
+            }
+            return out.sorted { $0.name < $1.name }
+        }
+    }
+
+    public func setStoragePoolActive(name: String, active: Bool) async throws {
+        try await run { conn in
+            guard let pool = virStoragePoolLookupByName(conn, name) else {
+                throw LibvirtError.lastError(fallback: "Storage pool \(name) not found")
+            }
+            defer { virStoragePoolFree(pool) }
+            let rc: Int32
+            if active {
+                rc = virStoragePoolCreate(pool, 0)
+            } else {
+                rc = virStoragePoolDestroy(pool)
+            }
+            guard rc == 0 else {
+                throw LibvirtError.lastError(fallback: active
+                    ? "Failed to start pool \(name)" : "Failed to stop pool \(name)")
+            }
+        }
+    }
+
+    public func refreshStoragePool(name: String) async throws {
+        try await run { conn in
+            guard let pool = virStoragePoolLookupByName(conn, name) else {
+                throw LibvirtError.lastError(fallback: "Storage pool \(name) not found")
+            }
+            defer { virStoragePoolFree(pool) }
+            guard virStoragePoolBuild(pool, 0) == 0 else {
+                throw LibvirtError.lastError(fallback: "Failed to refresh pool \(name)")
+            }
         }
     }
 

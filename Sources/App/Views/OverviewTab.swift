@@ -88,7 +88,7 @@ struct OverviewTab: View {
             ifacesLoaded = false
             while !Task.isCancelled {
                 guard domain.isActive else { ifaces = []; ifacesLoaded = true; return }
-                ifaces = await session.interfaceAddresses(uuid: domain.uuid)
+                ifaces = (try? await session.interfaceAddresses(uuid: domain.uuid)) ?? []
                 ifacesLoaded = true
                 try? await Task.sleep(for: .seconds(10))
             }

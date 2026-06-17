@@ -91,13 +91,14 @@ struct UploadISOSheet: View {
         error = nil
         Task {
             defer { working = false }
-            if let path = await session.uploadISO(
-                pool: pool, name: fileURL.lastPathComponent, localURL: fileURL,
-                progress: { progress = $0 }) {
+            do {
+                let path = try await session.uploadISO(
+                    pool: pool, name: fileURL.lastPathComponent, localURL: fileURL,
+                    progress: { progress = $0 })
                 onUploaded(path)
                 dismiss()
-            } else {
-                error = session.lastError ?? "Upload failed."
+            } catch let err {
+                error = err.localizedDescription
             }
         }
     }

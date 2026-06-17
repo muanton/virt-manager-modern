@@ -78,17 +78,18 @@ struct ConsoleTab: View {
     private func switchToVirtio() async {
         switching = true
         defer { switching = false }
-        guard let xml = await session.domainXML(uuid: domain.uuid),
-              let cfg = try? DomainConfig(xml: xml),
-              let newXML = cfg.xmlSwitchingVideoToVirtio() else {
-            switchResult = "Couldn't read the VM's video configuration."
-            return
-        }
-        if await session.defineXML(newXML) {
+        do {
+            let xml = try await session.domainXML(uuid: domain.uuid)
+            let cfg = try DomainConfig(xml: xml)
+            guard let newXML = cfg.xmlSwitchingVideoToVirtio() else {
+                switchResult = "Couldn't read the VM's video configuration."
+                return
+            }
+            _ = try await session.defineXML(newXML)
             videoModel = "virtio"
             switchResult = "Switched to virtio-gpu. Power-cycle the VM (Shut Down → Start) to apply."
-        } else {
-            switchResult = session.lastError ?? "Failed to update the VM."
+        } catch {
+            switchResult = error.localizedDescription
         }
     }
 
@@ -192,8 +193,11 @@ struct ConsoleTab: View {
 
         // Always refresh graphics + video model (cheap) so the QXL banner is
         // shown reliably even when returning to an already-connected console.
-        guard let xml = await session.domainXML(uuid: domain.uuid) else {
-            loadError = session.lastError; loaded = true; return
+        let xml: String
+        do {
+            xml = try await session.domainXML(uuid: domain.uuid)
+        } catch {
+            loadError = error.localizedDescription; loaded = true; return
         }
         let cfg = try? DomainConfig(xml: xml)
         let g = cfg?.graphics

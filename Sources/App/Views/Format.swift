@@ -3,6 +3,16 @@ import LibvirtKit
 
 enum Format {
     /// Formats a KiB value as a human-readable memory size.
+    static func bytes(_ bytes: UInt64) -> String {
+        let units = ["B", "KiB", "MiB", "GiB", "TiB"]
+        var value = Double(bytes)
+        var unit = 0
+        while value >= 1024 && unit < units.count - 1 {
+            value /= 1024; unit += 1
+        }
+        return String(format: value < 10 ? "%.1f %@" : "%.0f %@", value, units[unit])
+    }
+
     static func memory(kiB: UInt64) -> String {
         let bytes = Double(kiB) * 1024
         let units = ["KiB", "MiB", "GiB", "TiB"]

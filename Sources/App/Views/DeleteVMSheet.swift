@@ -114,32 +114,39 @@ struct DeleteVMSheet: View {
 
     private func load() async {
         await session.loadHostResources()
-        guard let xml = await session.domainXML(uuid: domain.uuid),
-              let cfg = try? DomainConfig(xml: xml) else {
-            error = session.lastError ?? "Couldn't read the VM's configuration."
+        do {
+            let xml = try await session.domainXML(uuid: domain.uuid)
+            let cfg = try DomainConfig(xml: xml)
+            let volumesByPath = Dictionary(uniqueKeysWithValues: session.volumes.map { ($0.path, $0) })
+            rows = cfg.disks.compactMap { d in
+                guard let src = d.source, src.hasPrefix("/") else { return nil }
+                return StorageRow(path: src, isCDROM: d.device == "cdrom",
+                                  volume: volumesByPath[src])
+            }
+            checked = Set(rows.filter { !$0.isCDROM && $0.volume != nil }.map(\.path))
             loaded = true
             return
+        } catch let err {
+            error = err.localizedDescription
+            loaded = true
         }
-        let volumesByPath = Dictionary(uniqueKeysWithValues: session.volumes.map { ($0.path, $0) })
-        rows = cfg.disks.compactMap { d in
-            guard let src = d.source, src.hasPrefix("/") else { return nil }
-            return StorageRow(path: src, isCDROM: d.device == "cdrom",
-                              volume: volumesByPath[src])
-        }
-        // Writable pool-managed disks are pre-checked; ISOs and unmanaged paths not.
-        checked = Set(rows.filter { !$0.isCDROM && $0.volume != nil }.map(\.path))
-        loaded = true
     }
 
     private func deleteNow() {
         working = true
         Task {
             defer { working = false }
-            if await session.deleteVM(uuid: domain.uuid, deleteStoragePaths: Array(checked)) {
+            do {
+                let warning = try await session.deleteVM(uuid: domain.uuid,
+                                                         deleteStoragePaths: Array(checked))
                 onDeleted()
-                dismiss()
-            } else {
-                error = session.lastError ?? "Deletion failed."
+                if let warning {
+                    error = warning
+                } else {
+                    dismiss()
+                }
+            } catch let err {
+                error = err.localizedDescription
             }
         }
     }

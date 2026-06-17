@@ -10,18 +10,21 @@ struct SidebarView: View {
     var onDeleteVM: (ConnectionSession, DomainSummary) -> Void
     var onCloneVM: (ConnectionSession, DomainSummary) -> Void
 
+    @State private var searchText = ""
+    @State private var storageSession: ConnectionSession?
+
     var body: some View {
         List(selection: $selection) {
             ForEach(appState.sessions) { session in
-                SessionSection(session: session, selection: $selection, onEdit: onEdit,
-                               onNewVM: onNewVM, onDeleteVM: onDeleteVM, onCloneVM: onCloneVM)
+                SessionSection(session: session, searchText: searchText, selection: $selection,
+                               onEdit: onEdit, onNewVM: onNewVM, onDeleteVM: onDeleteVM,
+                               onCloneVM: onCloneVM, onStorage: { storageSession = session })
             }
         }
         .listStyle(.sidebar)
         .navigationTitle("Virtual Machines")
+        .searchable(text: $searchText, prompt: "Filter VMs")
         .toolbar {
-            // One unambiguous "+" menu with labeled actions, instead of two
-            // near-identical icon buttons.
             ToolbarItem(placement: .primaryAction) {
                 Menu {
                     newVMMenuItems
@@ -32,6 +35,9 @@ struct SidebarView: View {
                 } label: { Label("Add", systemImage: "plus") }
                 .help("Create a new virtual machine or add a connection")
             }
+        }
+        .sheet(item: $storageSession) { session in
+            StoragePoolsSheet(session: session)
         }
     }
 
@@ -57,11 +63,22 @@ struct SidebarView: View {
 private struct SessionSection: View {
     @EnvironmentObject var appState: AppState
     @ObservedObject var session: ConnectionSession
+    let searchText: String
     @Binding var selection: DomainSelection?
     var onEdit: (ConnectionConfig) -> Void
     var onNewVM: (ConnectionSession) -> Void
     var onDeleteVM: (ConnectionSession, DomainSummary) -> Void
     var onCloneVM: (ConnectionSession, DomainSummary) -> Void
+    var onStorage: () -> Void
+
+    private var filteredDomains: [DomainSummary] {
+        let q = searchText.trimmingCharacters(in: .whitespaces).lowercased()
+        guard !q.isEmpty else { return session.domains }
+        return session.domains.filter {
+            $0.name.lowercased().contains(q) || $0.uuid.lowercased().contains(q)
+            || $0.state.label.lowercased().contains(q)
+        }
+    }
 
     var body: some View {
         Section {
@@ -85,14 +102,14 @@ private struct SessionSection: View {
                 .buttonStyle(.plain)
                 .foregroundStyle(.secondary)
             case .reconnecting:
-                // Keep the last-known VM list visible (stale but stable) so the
-                // selection and detail view don't blank out while we retry.
                 Label("Connection lost — reconnecting…", systemImage: "arrow.triangle.2.circlepath")
                     .foregroundStyle(.secondary)
                 domainRows
             case .connected:
                 if session.domains.isEmpty {
                     Text("No VMs").foregroundStyle(.secondary)
+                } else if filteredDomains.isEmpty {
+                    Text("No matches").foregroundStyle(.secondary)
                 } else {
                     domainRows
                 }
@@ -102,8 +119,6 @@ private struct SessionSection: View {
                 Text(session.config.name)
                 Spacer()
                 statusDot
-                // Visible entry point for per-connection actions (the same menu
-                // as right-click, which is otherwise undiscoverable on a header).
                 Menu { contextMenu } label: {
                     Image(systemName: "ellipsis.circle")
                 }
@@ -118,7 +133,7 @@ private struct SessionSection: View {
     }
 
     @ViewBuilder private var domainRows: some View {
-        ForEach(session.domains) { domain in
+        ForEach(filteredDomains) { domain in
             DomainRow(domain: domain, stats: session.stats[domain.uuid])
                 .tag(DomainSelection(sessionID: session.id, uuid: domain.uuid))
                 .contextMenu {
@@ -147,6 +162,7 @@ private struct SessionSection: View {
     @ViewBuilder private var contextMenu: some View {
         if session.isConnected {
             Button("New VM…") { onNewVM(session) }
+            Button("Manage Storage…") { onStorage() }
             Divider()
             Button("Disconnect") { session.disconnect() }
             Button("Reconnect") { reconnect() }

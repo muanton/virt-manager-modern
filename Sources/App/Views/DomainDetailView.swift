@@ -13,6 +13,7 @@ struct DomainDetailView: View {
 
     @EnvironmentObject private var appState: AppState
     @State private var confirmForceOff = false
+    @State private var lifecycleError: String?
     // This view is recreated per VM (.id in ContentView), so the selection is
     // restored from a per-VM runtime map in AppState: each VM remembers which
     // tab it was on for the lifetime of the app.
@@ -51,11 +52,11 @@ struct DomainDetailView: View {
                     Button("Force Off", role: .destructive) { act(.forceOff) }
                 }
                 .alert("Operation Failed", isPresented: Binding(
-                    get: { session.lastError != nil },
-                    set: { if !$0 { session.lastError = nil } })) {
-                    Button("OK", role: .cancel) { session.lastError = nil }
+                    get: { lifecycleError != nil },
+                    set: { if !$0 { lifecycleError = nil } })) {
+                    Button("OK", role: .cancel) { lifecycleError = nil }
                 } message: {
-                    Text(session.lastError ?? "")
+                    Text(lifecycleError ?? "")
                 }
             } else {
                 ContentUnavailableView("VM Unavailable", systemImage: "questionmark.folder")
@@ -122,6 +123,9 @@ struct DomainDetailView: View {
     }
 
     private func act(_ action: DomainAction) {
-        Task { await session.perform(action, on: uuid) }
+        Task {
+            do { try await session.perform(action, on: uuid) }
+            catch { lifecycleError = error.localizedDescription }
+        }
     }
 }

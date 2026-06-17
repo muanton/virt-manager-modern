@@ -54,7 +54,7 @@ struct CloneVMSheet: View {
                                 .foregroundStyle(.orange)
                             Spacer()
                             Button("Shut Down Now") {
-                                Task { await session.perform(.shutdown, on: domain.uuid) }
+                                Task { try? await session.perform(.shutdown, on: domain.uuid) }
                             }
                         }
                         Text("This dialog unlocks automatically once the VM is off.")
@@ -133,13 +133,15 @@ struct CloneVMSheet: View {
 
     private func load() async {
         newName = uniqueName(base: "\(domain.name)-clone")
-        guard let xml = await session.domainXML(uuid: domain.uuid),
-              let cfg = try? DomainConfig(xml: xml) else {
-            error = session.lastError ?? "Couldn't read the VM's configuration."
+        do {
+            let xml = try await session.domainXML(uuid: domain.uuid)
+            config = try DomainConfig(xml: xml)
+        } catch let err {
+            error = err.localizedDescription
             loaded = true
             return
         }
-        config = cfg
+        guard let cfg = config else { loaded = true; return }
         rows = cfg.disks.compactMap { d in
             guard let src = d.source, src.hasPrefix("/") else { return nil }
             return DiskRow(path: src, isCDROM: d.device == "cdrom")
@@ -175,20 +177,22 @@ struct CloneVMSheet: View {
                 case .clone:
                     progress = "Copying \((row.path as NSString).lastPathComponent)…"
                     let volName = cloneVolumeName(row.path)
-                    guard let newPath = await session.cloneVolume(path: row.path, newName: volName) else {
-                        error = session.lastError ?? "Failed to clone \(row.path)"
+                    do {
+                        pathMap[row.path] = try await session.cloneVolume(path: row.path, newName: volName)
+                    } catch let err {
+                        error = err.localizedDescription
                         return
                     }
-                    pathMap[row.path] = newPath
                 }
             }
             progress = "Defining \(newName)…"
             let xml = config.xmlForClone(newName: newName, diskPathMap: pathMap)
-            if let uuid = await session.defineAndReturnUUID(xml) {
+            do {
+                let uuid = try await session.defineAndReturnUUID(xml)
                 onCloned(uuid)
                 dismiss()
-            } else {
-                error = session.lastError ?? "Failed to define the clone."
+            } catch let err {
+                error = err.localizedDescription
             }
         }
     }

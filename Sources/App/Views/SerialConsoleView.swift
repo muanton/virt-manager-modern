@@ -48,24 +48,27 @@ struct SerialConsoleView: NSViewRepresentable {
         }
 
         private func connect() async {
-            handle = await session.openSerialConsole(
-                uuid: uuid,
-                onData: { [weak self] data in
-                    Task { @MainActor [weak self] in
-                        self?.receivedAny = true
-                        self?.terminal?.feed(byteArray: ArraySlice([UInt8](data)))
-                    }
-                },
-                onClose: { [weak self] error in
-                    Task { @MainActor [weak self] in
-                        let msg = error.map { "\r\n[console closed: \($0)]\r\n" }
-                                ?? "\r\n[console closed]\r\n"
-                        self?.terminal?.feed(text: msg)
-                    }
-                })
-            if handle == nil {
-                terminal?.feed(text: "\r\n[\(session.lastError ?? "failed to open console")]\r\n")
-            } else {
+            do {
+                handle = try await session.openSerialConsole(
+                    uuid: uuid,
+                    onData: { [weak self] data in
+                        Task { @MainActor [weak self] in
+                            self?.receivedAny = true
+                            self?.terminal?.feed(byteArray: ArraySlice([UInt8](data)))
+                        }
+                    },
+                    onClose: { [weak self] error in
+                        Task { @MainActor [weak self] in
+                            let msg = error.map { "\r\n[console closed: \($0)]\r\n" }
+                                    ?? "\r\n[console closed]\r\n"
+                            self?.terminal?.feed(text: msg)
+                        }
+                    })
+            } catch {
+                terminal?.feed(text: "\r\n[\(error.localizedDescription)]\r\n")
+                return
+            }
+            if handle != nil {
                 terminal?.feed(text: "[connected — keystrokes go to the guest]\r\n")
                 // A nudge so the guest reprints its login prompt.
                 handle?.send(Data("\r".utf8))

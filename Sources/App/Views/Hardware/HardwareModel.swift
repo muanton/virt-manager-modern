@@ -22,21 +22,19 @@ final class HardwareModel: ObservableObject {
         self.uuid = uuid
     }
 
-    // Host resources for the forms.
     var networks: [VirtNetwork] { session.networks }
     var volumes: [StorageVolume] { session.volumes }
     var usbDevices: [NodeDevice] { session.usbDevices }
     var pciDevices: [NodeDevice] { session.pciDevices }
     var storagePools: [String] { session.storagePools }
     func loadHostResources() async { await session.loadHostResources() }
+
     func createVolume(pool: String, name: String, sizeGiB: Double, format: String) async -> StorageVolume? {
         let bytes = UInt64(max(0, sizeGiB) * 1024 * 1024 * 1024)
-        let v = await session.createVolume(pool: pool, name: name, capacityBytes: bytes, format: format)
-        if v == nil { applyMessage = session.lastError }
-        return v
+        do { return try await session.createVolume(pool: pool, name: name, capacityBytes: bytes, format: format) }
+        catch { applyMessage = error.localizedDescription; return nil }
     }
 
-    // Schema-driven field access.
     func fieldString(_ id: String, _ loc: FieldLocator) -> String { config?.fieldString(deviceID: id, loc) ?? "" }
     func fieldBool(_ id: String, _ loc: FieldLocator) -> Bool { config?.fieldBool(deviceID: id, loc) ?? false }
     func setField(_ id: String, _ loc: FieldLocator, string: String?) {
@@ -56,11 +54,8 @@ final class HardwareModel: ObservableObject {
 
     func load() async {
         applyMessage = nil
-        guard let xml = await session.domainXML(uuid: uuid) else {
-            loadError = session.lastError ?? "No XML returned"
-            return
-        }
         do {
+            let xml = try await session.domainXML(uuid: uuid)
             config = try DomainConfig(xml: xml)
             devices = config?.deviceList() ?? []
             dirty = false
@@ -76,17 +71,17 @@ final class HardwareModel: ObservableObject {
         guard let config else { return }
         applying = true
         defer { applying = false }
-        if await session.defineXML(config.xmlString()) {
+        do {
+            _ = try await session.defineXML(config.xmlString())
             applyMessage = "Applied. Changes take effect after the VM restarts."
             await load()
-        } else {
-            applyMessage = session.lastError ?? "Failed to apply changes."
+        } catch {
+            applyMessage = error.localizedDescription
         }
     }
 
     var isRunning: Bool { session.domain(uuid: uuid)?.isActive == true }
 
-    /// Whether a device kind supports live attach/detach under QEMU.
     static func isHotpluggable(_ kind: DeviceKind) -> Bool {
         switch kind {
         case .disk, .cdrom, .interface, .hostdev, .redirdev: return true
@@ -94,77 +89,76 @@ final class HardwareModel: ObservableObject {
         }
     }
 
-    /// Live-attach a new device (also persisted). Reloads on success.
     func attachDeviceLive(xml: String) async -> Bool {
         applying = true
         defer { applying = false }
-        if await session.attachDevice(uuid: uuid, xml: xml, live: true, persistent: true) {
+        do {
+            try await session.attachDevice(uuid: uuid, xml: xml, live: true, persistent: true)
             await load()
             applyMessage = "Device attached to the running VM."
             return true
+        } catch {
+            applyMessage = error.localizedDescription
+            return false
         }
-        applyMessage = session.lastError ?? "Live attach failed."
-        return false
     }
 
-    /// Live-detach an existing device (also removed from the config).
     func detachDeviceLive(id: String) async -> Bool {
         guard let xml = config?.deviceXML(id: id) else { return false }
         applying = true
         defer { applying = false }
-        if await session.detachDevice(uuid: uuid, xml: xml, live: true, persistent: true) {
+        do {
+            try await session.detachDevice(uuid: uuid, xml: xml, live: true, persistent: true)
             await load()
             applyMessage = "Device detached from the running VM."
             return true
+        } catch {
+            applyMessage = error.localizedDescription
+            return false
         }
-        applyMessage = session.lastError ?? "Live detach failed."
-        return false
     }
 
     func applyVcpusLive(_ count: Int) async {
         applying = true
         defer { applying = false }
-        if await session.setVcpusLive(uuid: uuid, count: count) {
+        do {
+            try await session.setVcpusLive(uuid: uuid, count: count)
             await load()
             applyMessage = "vCPU count changed on the running VM."
-        } else {
-            applyMessage = session.lastError ?? "Live vCPU change failed."
+        } catch {
+            applyMessage = error.localizedDescription
         }
     }
 
     func applyMemoryLive(currentMiB: Double) async {
         applying = true
         defer { applying = false }
-        if await session.setMemoryLive(uuid: uuid, kib: UInt64(max(0, currentMiB) * 1024)) {
+        do {
+            try await session.setMemoryLive(uuid: uuid, kib: UInt64(max(0, currentMiB) * 1024))
             await load()
             applyMessage = "Memory changed on the running VM."
-        } else {
-            applyMessage = session.lastError ?? "Live memory change failed."
+        } catch {
+            applyMessage = error.localizedDescription
         }
     }
 
-    // Add-rule queries (forwarded from the working copy so staged edits count).
     func addBlockReason(for kind: DeviceKind) -> String? { config?.addBlockReason(for: kind) }
     var graphicsTypes: Set<String> { config?.graphicsTypes ?? [] }
     var channelTargetNames: Set<String> { config?.channelTargetNames ?? [] }
     var inputPairs: Set<String> { config?.inputPairs ?? [] }
 
-    /// Ejects CD-ROM media immediately (live + persistent via update-device,
-    /// not the Apply path), then mirrors it in the working copy so other
-    /// pending edits survive.
     func ejectCDROM(_ id: String) async {
         applying = true
         defer { applying = false }
-        if await session.ejectCDROM(uuid: uuid, deviceID: id) {
+        do {
+            try await session.ejectCDROM(uuid: uuid, deviceID: id)
             config?.clearDiskSource(deviceID: id)
             devices = config?.deviceList() ?? []
             applyMessage = "Media ejected."
-        } else {
-            applyMessage = session.lastError ?? "Failed to eject media."
+        } catch {
+            applyMessage = error.localizedDescription
         }
     }
-
-    // MARK: - Mutations (all stage into the working copy)
 
     private func touched() {
         devices = config?.deviceList() ?? []
@@ -201,7 +195,6 @@ final class HardwareModel: ObservableObject {
         }
     }
 
-    // Convenience reads for editors
     func disk(id: String) -> DiskInfo? { config?.disk(id: id) }
     func nic(id: String) -> NICInfo? { config?.nic(id: id) }
     func deviceXML(id: String) -> String? { config?.deviceXML(id: id) }
@@ -213,7 +206,6 @@ final class HardwareModel: ObservableObject {
     var bootDevices: [String] { config?.bootDevices ?? [] }
     var videoModel: String? { config?.videoModel }
 
-    // MARK: - General / metadata
     var vmName: String { config?.name ?? "" }
     var title: String { config?.title ?? "" }
     func setTitle(_ s: String) { config?.title = s; touched() }
@@ -225,10 +217,11 @@ final class HardwareModel: ObservableObject {
     var emulator: String { config?.emulator ?? "" }
     var firmwareLabel: String { config?.firmwareLabel ?? "" }
 
-    func loadAutostart() async -> Bool { await session.autostart(uuid: uuid) }
-    func setAutostart(_ on: Bool) async -> Bool { await session.setAutostart(uuid: uuid, on) }
+    func loadAutostart() async -> Bool { (try? await session.autostart(uuid: uuid)) ?? false }
+    func setAutostart(_ on: Bool) async -> Bool {
+        (try? await session.setAutostart(uuid: uuid, on)) != nil
+    }
 
-    // MARK: - CPU mode / topology
     var cpuMode: String { config?.cpuMode ?? "" }
     func setCPUMode(_ m: String) { config?.cpuMode = m; touched() }
     var cpuModelName: String { config?.cpuModelName ?? "" }
@@ -238,7 +231,6 @@ final class HardwareModel: ObservableObject {
         config?.cpuTopology = t; touched()
     }
 
-    // MARK: - Boot menu
     var bootMenu: Bool { config?.bootMenu ?? false }
     func setBootMenu(_ b: Bool) { config?.bootMenu = b; touched() }
 }

@@ -2,8 +2,6 @@ import SwiftUI
 import LibvirtKit
 
 /// Snapshot management: tree-ordered list, create / revert / delete.
-/// Snapshots are full system snapshots (disks + memory when the VM runs);
-/// they require qcow2 storage — libvirt's error is surfaced verbatim if not.
 struct SnapshotsTab: View {
     @ObservedObject var session: ConnectionSession
     let domain: DomainSummary
@@ -15,11 +13,23 @@ struct SnapshotsTab: View {
     @State private var newName = ""
     @State private var newDescription = ""
     @State private var working = false
+    @State private var error: String?
     @State private var confirmRevert: Snapshot?
     @State private var confirmDelete: Snapshot?
 
     var body: some View {
         VStack(spacing: 0) {
+            if let error {
+                HStack {
+                    Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
+                    Text(error).font(.caption)
+                    Spacer()
+                    Button { self.error = nil } label: { Image(systemName: "xmark") }
+                        .buttonStyle(.plain)
+                }
+                .padding(8)
+                .background(Color.orange.opacity(0.12))
+            }
             if !loaded {
                 Spacer(); ProgressView().controlSize(.large); Spacer()
             } else if snapshots.isEmpty {
@@ -41,7 +51,6 @@ struct SnapshotsTab: View {
                 Spacer()
                 Button("Revert…") { confirmRevert = selected }
                     .disabled(selected == nil || working)
-                    .help("Roll the VM back to this snapshot's state")
                 Button("Delete…") { confirmDelete = selected }
                     .disabled(selected == nil || working)
             }
@@ -67,11 +76,8 @@ struct SnapshotsTab: View {
         }
     }
 
-    // MARK: - Rows / tree
-
     private struct TreeEntry { let snapshot: Snapshot; let depth: Int }
 
-    /// Parent-before-child ordering with depth for indentation.
     private var treeOrdered: [TreeEntry] {
         let byParent = Dictionary(grouping: snapshots, by: { $0.parent ?? "" })
         var out: [TreeEntry] = []
@@ -82,7 +88,6 @@ struct SnapshotsTab: View {
             }
         }
         walk("", depth: 0)
-        // Orphans (parent not in the list) — append flat so nothing is hidden.
         let seen = Set(out.map(\.snapshot.name))
         for s in snapshots where !seen.contains(s.name) {
             out.append(TreeEntry(snapshot: s, depth: 0))
@@ -122,8 +127,6 @@ struct SnapshotsTab: View {
             .time(includingFractionalSeconds: false)).replacingOccurrences(of: ":", with: "")
     }
 
-    // MARK: - Create sheet
-
     private var createSheet: some View {
         VStack(alignment: .leading, spacing: 0) {
             Text("Take Snapshot").font(.title2).bold().padding([.top, .horizontal])
@@ -149,11 +152,12 @@ struct SnapshotsTab: View {
         .frame(width: 420)
     }
 
-    // MARK: - Actions
-
     private func reload() async {
-        if let snaps = await session.snapshots(uuid: domain.uuid) {
-            snapshots = snaps
+        do {
+            snapshots = try await session.snapshots(uuid: domain.uuid)
+            error = nil
+        } catch let err {
+            error = err.localizedDescription
         }
         loaded = true
     }
@@ -162,10 +166,13 @@ struct SnapshotsTab: View {
         working = true
         Task {
             defer { working = false }
-            if await session.createSnapshot(uuid: domain.uuid, name: newName,
-                                            description: newDescription) {
+            do {
+                try await session.createSnapshot(uuid: domain.uuid, name: newName,
+                                                 description: newDescription)
                 creating = false
                 await reload()
+            } catch let err {
+                error = err.localizedDescription
             }
         }
     }
@@ -174,8 +181,12 @@ struct SnapshotsTab: View {
         working = true
         Task {
             defer { working = false }
-            _ = await session.revertToSnapshot(uuid: domain.uuid, name: snap.name)
-            await reload()
+            do {
+                try await session.revertToSnapshot(uuid: domain.uuid, name: snap.name)
+                await reload()
+            } catch let err {
+                error = err.localizedDescription
+            }
         }
     }
 
@@ -183,8 +194,12 @@ struct SnapshotsTab: View {
         working = true
         Task {
             defer { working = false }
-            _ = await session.deleteSnapshot(uuid: domain.uuid, name: snap.name)
-            await reload()
+            do {
+                try await session.deleteSnapshot(uuid: domain.uuid, name: snap.name)
+                await reload()
+            } catch let err {
+                error = err.localizedDescription
+            }
         }
     }
 }

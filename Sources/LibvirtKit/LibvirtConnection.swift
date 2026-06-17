@@ -210,6 +210,17 @@ public final class LibvirtConnection: @unchecked Sendable {
         }
     }
 
+    /// Removes a domain definition without cleanup flags (for the test driver).
+    public func undefineBasic(uuid: String) async throws {
+        try await run { conn in
+            try Self.withDomain(conn, uuid: uuid) { dom in
+                guard virDomainUndefine(dom) == 0 else {
+                    throw LibvirtError.lastError(fallback: "Failed to undefine domain")
+                }
+            }
+        }
+    }
+
     // MARK: - Lifecycle
 
     public func perform(_ action: DomainAction, uuid: String) async throws {
@@ -328,6 +339,10 @@ public final class LibvirtConnection: @unchecked Sendable {
     }
 
     /// Extracts an immutable summary from a live `virDomainPtr`.
+    static func domainSummary(from dom: OpaquePointer) -> DomainSummary {
+        summary(of: dom)
+    }
+
     private static func summary(of dom: OpaquePointer) -> DomainSummary {
         let name = virDomainGetName(dom).map { String(cString: $0) } ?? "(unnamed)"
 

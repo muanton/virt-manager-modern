@@ -361,38 +361,41 @@ struct NewVMSheet: View {
         working = true; error = nil
         Task {
             defer { working = false }
-            var diskPath: String?
-            if installMethod == "import" {
-                diskPath = importPath
-            } else if enableStorage {
-                switch storageMode {
-                case "new":
-                    let volName = newName.isEmpty ? name : newName
-                    guard let vol = await session.createVolume(pool: newPool, name: volName,
-                        capacityBytes: UInt64(max(1, newSize) * 1024 * 1024 * 1024), format: newFormat)
-                    else { error = session.lastError ?? "Failed to create disk"; return }
-                    diskPath = vol.path
-                case "existing": diskPath = existingDisk
-                default: diskPath = customPath
+            do {
+                var diskPath: String?
+                if installMethod == "import" {
+                    diskPath = importPath
+                } else if enableStorage {
+                    switch storageMode {
+                    case "new":
+                        let volName = newName.isEmpty ? name : newName
+                        let vol = try await session.createVolume(
+                            pool: newPool, name: volName,
+                            capacityBytes: UInt64(max(1, newSize) * 1024 * 1024 * 1024),
+                            format: newFormat)
+                        diskPath = vol.path
+                    case "existing": diskPath = existingDisk
+                    default: diskPath = customPath
+                    }
                 }
-            }
 
-            let install: NewVMSpec.Install =
-                installMethod == "iso" ? .iso(isoPath) :
-                installMethod == "import" ? .importDisk : .none
-            let netSource = networkSel == "__bridge__" ? "bridge:\(bridge)" : networkSel
-            let spec = NewVMSpec(name: name, os: guestOS, firmware: firmware,
-                                 memoryMiB: Int(memoryMiB), vcpus: vcpus, install: install,
-                                 diskPath: diskPath, networkSource: netSource, graphics: graphics)
-            let caps = session.domainCaps
-            let xml = DomainTemplate.buildXML(spec, domainType: caps.domainType,
-                                              emulator: caps.emulator, arch: caps.arch)
-            guard let uuid = await session.createDomain(xml: xml) else {
-                error = session.lastError ?? "Failed to define the VM"; return
+                let install: NewVMSpec.Install =
+                    installMethod == "iso" ? .iso(isoPath) :
+                    installMethod == "import" ? .importDisk : .none
+                let netSource = networkSel == "__bridge__" ? "bridge:\(bridge)" : networkSel
+                let spec = NewVMSpec(name: name, os: guestOS, firmware: firmware,
+                                     memoryMiB: Int(memoryMiB), vcpus: vcpus, install: install,
+                                     diskPath: diskPath, networkSource: netSource, graphics: graphics)
+                let caps = session.domainCaps
+                let xml = DomainTemplate.buildXML(spec, domainType: caps.domainType,
+                                                  emulator: caps.emulator, arch: caps.arch)
+                let uuid = try await session.createDomain(xml: xml)
+                if startNow { try await session.perform(.start, on: uuid) }
+                onCreated(uuid, startNow && openConsole)
+                dismiss()
+            } catch let err {
+                error = err.localizedDescription
             }
-            if startNow { await session.perform(.start, on: uuid) }
-            onCreated(uuid, startNow && openConsole)
-            dismiss()
         }
     }
 }
