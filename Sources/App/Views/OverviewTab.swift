@@ -8,6 +8,7 @@ struct OverviewTab: View {
     @State private var ifaces: [IfaceAddr] = []
     @State private var agentStatus: GuestAgentStatus = .inactive
     @State private var ifacesLoaded = false
+    @State private var hasManagedSave = false
 
     var body: some View {
         Form {
@@ -17,6 +18,12 @@ struct OverviewTab: View {
                         Image(systemName: domain.state.symbol)
                             .foregroundStyle(domain.state.color)
                         Text(domain.state.label)
+                    }
+                }
+                if !domain.isActive, hasManagedSave {
+                    LabeledContent("Saved state") {
+                        Label("On disk — Start restores memory", systemImage: "square.and.arrow.down")
+                            .foregroundStyle(.secondary)
                     }
                 }
                 LabeledContent("Domain ID", value: domain.domainID >= 0 ? "\(domain.domainID)" : "—")
@@ -100,6 +107,7 @@ struct OverviewTab: View {
         }
         .formStyle(.grouped)
         .task(id: "\(domain.uuid)-\(domain.state.rawValue)") {
+            hasManagedSave = (try? await session.hasManagedSave(uuid: domain.uuid)) ?? false
             ifacesLoaded = false
             while !Task.isCancelled {
                 guard domain.isActive else {

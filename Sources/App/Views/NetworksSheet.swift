@@ -9,6 +9,7 @@ struct NetworksSheet: View {
     @State private var working = false
     @State private var error: String?
     @State private var confirmDelete: VirtNetwork?
+    @State private var editor: NetworkEditorContext?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -19,6 +20,8 @@ struct NetworksSheet: View {
                     Label("Refresh", systemImage: "arrow.clockwise")
                 }
                 .disabled(working)
+                Button("New from XML…") { newFromXML() }
+                    .disabled(working)
                 Button("Add Default NAT…") { addDefault() }
                     .disabled(working)
             }
@@ -50,6 +53,11 @@ struct NetworksSheet: View {
         }
         .frame(width: 560, height: 420)
         .task { await reload() }
+        .sheet(item: $editor) { ctx in
+            NetworkXMLEditorSheet(session: session, context: ctx) {
+                Task { await reload() }
+            }
+        }
         .confirmationDialog(
             "Delete network “\(confirmDelete?.name ?? "")”?",
             isPresented: Binding(get: { confirmDelete != nil },
@@ -82,6 +90,7 @@ struct NetworksSheet: View {
                 Button("Start") { setActive(net.name, true) }.disabled(working)
             }
             if net.persistent {
+                Button("Edit XML") { editNetwork(net) }.disabled(working)
                 Button(role: .destructive) { confirmDelete = net } label: {
                     Image(systemName: "trash")
                 }
@@ -116,6 +125,38 @@ struct NetworksSheet: View {
             defer { working = false }
             do {
                 try await session.setNetworkActive(name: name, active: active)
+                error = nil
+            } catch let err {
+                error = err.localizedDescription
+            }
+        }
+    }
+
+    private func newFromXML() {
+        editor = NetworkEditorContext(
+            existingName: nil,
+            xml: """
+            <network>
+              <name>newnet</name>
+              <bridge name='virbr1' stp='on' delay='0'/>
+              <forward mode='nat'/>
+              <ip address='192.168.100.1' netmask='255.255.255.0'>
+                <dhcp>
+                  <range start='192.168.100.2' end='192.168.100.254'/>
+                </dhcp>
+              </ip>
+            </network>
+            """,
+            startAfterApply: true)
+    }
+
+    private func editNetwork(_ net: VirtNetwork) {
+        working = true
+        Task {
+            defer { working = false }
+            do {
+                let xml = try await session.networkXML(name: net.name)
+                editor = NetworkEditorContext(existingName: net.name, xml: xml, startAfterApply: false)
                 error = nil
             } catch let err {
                 error = err.localizedDescription

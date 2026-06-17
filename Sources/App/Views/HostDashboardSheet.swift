@@ -7,6 +7,7 @@ struct HostDashboardSheet: View {
 
     @State private var loaded = false
     @State private var error: String?
+    @State private var refreshTask: Task<Void, Never>?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -45,7 +46,18 @@ struct HostDashboardSheet: View {
                         if host.node.mhz > 0 {
                             LabeledContent("CPU frequency", value: "\(host.node.mhz) MHz")
                         }
-                        LabeledContent("Memory", value: Format.memory(kiB: host.node.memoryKiB))
+                        LabeledContent("Installed memory", value: Format.memory(kiB: host.node.memoryKiB))
+                        if let mem = liveMemory {
+                            LabeledContent("Memory in use") {
+                                memoryBar(used: mem.usedKiB, total: mem.totalKiB ?? host.node.memoryKiB)
+                            }
+                            if let free = mem.usableKiB {
+                                LabeledContent("Available", value: Format.memory(kiB: free))
+                            }
+                            if let cached = mem.cachedKiB, cached > 0 {
+                                LabeledContent("Cached", value: Format.memory(kiB: cached))
+                            }
+                        }
                         if host.node.sockets > 1 || host.node.cores > 1 {
                             LabeledContent("Topology") {
                                 Text("\(host.node.sockets) sockets × \(host.node.cores) cores"
@@ -67,7 +79,26 @@ struct HostDashboardSheet: View {
             .padding()
         }
         .frame(width: 480, height: 420)
-        .task { await reload() }
+        .task {
+            await reload()
+            startLiveRefresh()
+        }
+        .onDisappear { refreshTask?.cancel() }
+    }
+
+    private var liveMemory: HostMemoryStats? {
+        session.hostMemoryStats ?? session.hostSummary?.memory
+    }
+
+    @ViewBuilder
+    private func memoryBar(used: UInt64?, total: UInt64) -> some View {
+        let usedKiB = used ?? 0
+        let pct = total > 0 ? Double(usedKiB) / Double(total) : 0
+        HStack(spacing: 8) {
+            ProgressView(value: min(pct, 1.0)).frame(width: 160)
+            Text("\(Format.memory(kiB: usedKiB)) of \(Format.memory(kiB: total))")
+                .monospacedDigit().foregroundStyle(.secondary)
+        }
     }
 
     private func reload() async {
@@ -78,5 +109,15 @@ struct HostDashboardSheet: View {
             error = nil
         }
         loaded = true
+    }
+
+    private func startLiveRefresh() {
+        refreshTask?.cancel()
+        refreshTask = Task {
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(5))
+                await session.refreshHostMemoryStats()
+            }
+        }
     }
 }

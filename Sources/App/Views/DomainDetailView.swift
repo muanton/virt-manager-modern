@@ -12,6 +12,9 @@ struct DomainDetailView: View {
 
     @EnvironmentObject private var appState: AppState
     @State private var confirmForceOff = false
+    @State private var confirmSave = false
+    @State private var confirmDiscardSave = false
+    @State private var hasManagedSave = false
     @State private var lifecycleError: String?
     @State private var tab = 0
 
@@ -36,7 +39,7 @@ struct DomainDetailView: View {
                 }
                 .padding()
                 .navigationTitle(domain.name)
-                .navigationSubtitle(domain.state.label)
+                .navigationSubtitle(subtitle(for: domain))
                 .toolbar { lifecycleToolbar(domain) }
                 .toolbarBackground(.visible, for: .windowToolbar)
                 .background { lifecycleShortcuts(domain) }
@@ -44,6 +47,17 @@ struct DomainDetailView: View {
                                     isPresented: $confirmForceOff, titleVisibility: .visible) {
                     Button("Force Off", role: .destructive) { act(.forceOff) }
                 }
+                .confirmationDialog(
+                    "Save \(domain.name) to disk? The VM will shut down and its memory state is stored on the host.",
+                    isPresented: $confirmSave, titleVisibility: .visible) {
+                    Button("Save") { act(.save) }
+                }
+                .confirmationDialog(
+                    "Discard saved state for \(domain.name)? The next start will boot fresh.",
+                    isPresented: $confirmDiscardSave, titleVisibility: .visible) {
+                    Button("Discard", role: .destructive) { discardSave() }
+                }
+                .task(id: "\(uuid)-\(domain.state.rawValue)") { await refreshManagedSave() }
                 .alert("Operation Failed", isPresented: Binding(
                     get: { lifecycleError != nil },
                     set: { if !$0 { lifecycleError = nil } })) {
@@ -82,6 +96,12 @@ struct DomainDetailView: View {
                        help: "Shut Down — graceful ACPI shutdown (⇧⌘D)")
                 button("Reboot", "arrow.clockwise", .reboot, key: "r", modifiers: [.command, .shift],
                        help: "Reboot — graceful guest restart (⇧⌘R)")
+                if !domain.state.isPaused {
+                    Button { confirmSave = true } label: {
+                        Label("Save", systemImage: "square.and.arrow.down")
+                    }
+                    .help("Save — hibernate the VM to disk (managed save)")
+                }
                 Button(role: .destructive) {
                     confirmForceOff = true
                 } label: { Label("Force Off", systemImage: "bolt.fill") }
@@ -96,8 +116,20 @@ struct DomainDetailView: View {
                 }
                 .help("Delete — remove the VM and optionally its disks")
             } else {
-                button("Start", "play.fill", .start, key: .return,
-                       help: "Start — power on the VM (⌘↩)")
+                Button { act(.start) } label: {
+                    Label(hasManagedSave ? "Restore" : "Start",
+                          systemImage: "play.fill")
+                }
+                .keyboardShortcut(.return, modifiers: .command)
+                .help(hasManagedSave
+                      ? "Restore — resume from the saved state on disk (⌘↩)"
+                      : "Start — power on the VM (⌘↩)")
+                if hasManagedSave {
+                    Button { confirmDiscardSave = true } label: {
+                        Label("Discard State", systemImage: "trash.slash")
+                    }
+                    .help("Discard the saved state so the next start boots fresh")
+                }
                 Button { onClone(domain) } label: {
                     Label("Clone", systemImage: "plus.square.on.square")
                 }
@@ -141,10 +173,36 @@ struct DomainDetailView: View {
             .help(help)
     }
 
+    private func subtitle(for domain: DomainSummary) -> String {
+        if !domain.isActive, hasManagedSave {
+            return "\(domain.state.label) · saved state on disk"
+        }
+        return domain.state.label
+    }
+
+    private func refreshManagedSave() async {
+        hasManagedSave = (try? await session.hasManagedSave(uuid: uuid)) ?? false
+    }
+
+    private func discardSave() {
+        Task {
+            do {
+                try await session.removeManagedSave(uuid: uuid)
+                await refreshManagedSave()
+            } catch {
+                lifecycleError = error.localizedDescription
+            }
+        }
+    }
+
     private func act(_ action: DomainAction) {
         Task {
-            do { try await session.perform(action, on: uuid) }
-            catch { lifecycleError = error.localizedDescription }
+            do {
+                try await session.perform(action, on: uuid)
+                if action == .save { await refreshManagedSave() }
+            } catch {
+                lifecycleError = error.localizedDescription
+            }
         }
     }
 }

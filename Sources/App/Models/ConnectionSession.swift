@@ -35,6 +35,7 @@ final class ConnectionSession: ObservableObject, Identifiable {
     @Published private(set) var pciDevices: [NodeDevice] = []
     @Published private(set) var domainCaps: DomainCaps = .fallback
     @Published private(set) var hostSummary: HostSummary?
+    @Published private(set) var hostMemoryStats: HostMemoryStats?
     private var hostResourcesLoaded = false
 
     private var conn: LibvirtConnection?
@@ -81,6 +82,7 @@ final class ConnectionSession: ObservableObject, Identifiable {
         domains = []
         pools = []
         hostSummary = nil
+        hostMemoryStats = nil
         status = .disconnected
     }
 
@@ -185,7 +187,32 @@ final class ConnectionSession: ObservableObject, Identifiable {
 
     func refreshHostSummary() async {
         guard let conn else { return }
-        hostSummary = try? await conn.hostSummary()
+        if let summary = try? await conn.hostSummary() {
+            hostSummary = summary
+            hostMemoryStats = summary.memory
+        } else {
+            hostSummary = nil
+        }
+        if hostMemoryStats == nil {
+            hostMemoryStats = try? await conn.nodeMemoryStats()
+        }
+    }
+
+    func refreshHostMemoryStats() async {
+        guard let conn else { return }
+        hostMemoryStats = try? await conn.nodeMemoryStats()
+    }
+
+    func hasManagedSave(uuid: String) async throws -> Bool {
+        try await requireConnection().hasManagedSave(uuid: uuid)
+    }
+
+    func removeManagedSave(uuid: String) async throws {
+        try await requireConnection().removeManagedSave(uuid: uuid)
+    }
+
+    func networkXML(name: String) async throws -> String {
+        try await requireConnection().networkXML(name: name)
     }
 
     private func refreshStats() async {
@@ -227,6 +254,7 @@ final class ConnectionSession: ObservableObject, Identifiable {
                         self.beginReconnect()
                     } else {
                         await self.refreshStats()
+                        await self.refreshHostMemoryStats()
                     }
                 }
             }
@@ -453,9 +481,11 @@ final class ConnectionSession: ObservableObject, Identifiable {
         hostResourcesLoaded = true
     }
 
-    func defineNetwork(xml: String) async throws {
-        _ = try await requireConnection().defineNetwork(xml: xml)
+    @discardableResult
+    func defineNetwork(xml: String) async throws -> VirtNetwork {
+        let net = try await requireConnection().defineNetwork(xml: xml)
         try await loadNetworks()
+        return net
     }
 
     func setNetworkActive(name: String, active: Bool) async throws {

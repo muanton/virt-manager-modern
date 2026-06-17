@@ -222,6 +222,26 @@ public final class LibvirtConnection: @unchecked Sendable {
         }
     }
 
+    // MARK: - Managed save
+
+    public func hasManagedSave(uuid: String) async throws -> Bool {
+        try await run { conn in
+            try Self.withDomain(conn, uuid: uuid) { dom in
+                virDomainHasManagedSaveImage(dom, 0) == 1
+            }
+        }
+    }
+
+    public func removeManagedSave(uuid: String) async throws {
+        try await run { conn in
+            try Self.withDomain(conn, uuid: uuid) { dom in
+                guard virDomainManagedSaveRemove(dom, 0) == 0 else {
+                    throw LibvirtError.lastError(fallback: "Failed to remove saved state")
+                }
+            }
+        }
+    }
+
     // MARK: - Lifecycle
 
     public func perform(_ action: DomainAction, uuid: String) async throws {

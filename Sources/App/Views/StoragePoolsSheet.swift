@@ -10,6 +10,12 @@ struct StoragePoolsSheet: View {
     @State private var error: String?
     @State private var expandedPools: Set<String> = []
     @State private var confirmDelete: StorageVolume?
+    @State private var createInPool: PoolRef?
+
+    private struct PoolRef: Identifiable {
+        let name: String
+        var id: String { name }
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -66,6 +72,11 @@ struct StoragePoolsSheet: View {
         }
         .frame(width: 560, height: 480)
         .task { await reload() }
+        .sheet(item: $createInPool) { ref in
+            CreateVolumeSheet(session: session, pool: ref.name) {
+                Task { await reload() }
+            }
+        }
         .confirmationDialog(
             "Delete volume “\(confirmDelete?.name ?? "")”?",
             isPresented: Binding(get: { confirmDelete != nil },
@@ -118,6 +129,16 @@ struct StoragePoolsSheet: View {
             }
             Button("Rescan") { refresh(pool.name) }
                 .disabled(working)
+            if pool.active {
+                Button {
+                    createInPool = PoolRef(name: pool.name)
+                } label: {
+                    Image(systemName: "plus")
+                }
+                .buttonStyle(.plain)
+                .help("Create a new volume in this pool")
+                .disabled(working)
+            }
         }
     }
 

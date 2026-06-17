@@ -68,6 +68,25 @@ final class IntegrationTests: XCTestCase {
         XCTAssertGreaterThan(summary.domainCount, 0)
     }
 
+    func testNodeMemoryStats() async throws {
+        let conn = try await LibvirtConnection.open(uri: uri)
+        defer { conn.close() }
+        // The built-in test driver does not implement virNodeGetMemoryStats.
+        guard let stats = try? await conn.nodeMemoryStats() else { return }
+        XCTAssertNotNil(stats.totalKiB ?? stats.freeKiB ?? stats.availableKiB)
+    }
+
+    func testHasManagedSave() async throws {
+        let conn = try await LibvirtConnection.open(uri: uri)
+        defer { conn.close() }
+        let domains = try await conn.listDomains()
+        guard let domain = domains.first else {
+            XCTFail("No domains in test driver")
+            return
+        }
+        _ = try await conn.hasManagedSave(uuid: domain.uuid)
+    }
+
     func testListNetworks() async throws {
         let conn = try await LibvirtConnection.open(uri: uri)
         defer { conn.close() }
