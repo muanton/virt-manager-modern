@@ -60,7 +60,7 @@ final class SpiceBridge: @unchecked Sendable {
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
             self.lock.lock(); self.redrawPending = false; self.lock.unlock()
-            self.view?.needsDisplay = true
+            self.view?.refreshDisplay()
         }
     }
 

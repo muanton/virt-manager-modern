@@ -13,10 +13,12 @@ final class ConsoleDetachController: NSObject, ObservableObject, NSWindowDelegat
     private weak var container: ConsoleDetachContainerView?
     private weak var placeholder: NSView?
     private var constraints: [NSLayoutConstraint] = []
+    private var extraRefresh: (() -> Void)?
 
-    func detach(view: NSView, title: String) {
+    func detach(view: NSView, title: String, refresh: (() -> Void)? = nil) {
         guard window == nil, let parent = view.superview else { return }
         consoleView = view
+        extraRefresh = refresh
 
         let ph = NSView()
         ph.translatesAutoresizingMaskIntoConstraints = false
@@ -37,7 +39,7 @@ final class ConsoleDetachController: NSObject, ObservableObject, NSWindowDelegat
 
         let w = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 1024, height: 768),
-            styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
+            styleMask: [.titled, .closable, .miniaturizable, .resizable],
             backing: .buffered, defer: false)
         w.title = title
         w.delegate = self
@@ -49,6 +51,7 @@ final class ConsoleDetachController: NSObject, ObservableObject, NSWindowDelegat
         let box = ConsoleDetachContainerView(frame: w.contentView?.bounds ?? .zero)
         box.autoresizingMask = [.width, .height]
         box.consoleView = view
+        box.onLayout = { [weak self] in self?.refreshConsoleView() }
         w.contentView = box
         container = box
 
@@ -61,11 +64,8 @@ final class ConsoleDetachController: NSObject, ObservableObject, NSWindowDelegat
         isDetached = true
         w.center()
         w.makeKeyAndOrderFront(nil)
-        DispatchQueue.main.async { [weak self] in
-            self?.layoutConsoleView()
-            self?.refreshConsoleView()
-            view.window?.makeFirstResponder(view)
-        }
+        scheduleRefreshes()
+        DispatchQueue.main.async { view.window?.makeFirstResponder(view) }
     }
 
     func reattach() {
@@ -77,6 +77,7 @@ final class ConsoleDetachController: NSObject, ObservableObject, NSWindowDelegat
         ph.removeFromSuperview()
         placeholder = nil
         container = nil
+        extraRefresh = nil
 
         parent.addSubview(view)
         NSLayoutConstraint.activate(constraints)
@@ -84,6 +85,9 @@ final class ConsoleDetachController: NSObject, ObservableObject, NSWindowDelegat
         consoleView = nil
         closeWindow()
         DispatchQueue.main.async {
+            if let spice = view as? SpiceDisplayView {
+                spice.refreshDisplay()
+            }
             refreshConsoleViewAfterResize(view)
             view.window?.makeFirstResponder(view)
         }
@@ -103,17 +107,11 @@ final class ConsoleDetachController: NSObject, ObservableObject, NSWindowDelegat
     }
 
     func windowDidEnterFullScreen(_ notification: Notification) {
-        DispatchQueue.main.async { [weak self] in
-            self?.layoutConsoleView()
-            self?.refreshConsoleView()
-        }
+        scheduleRefreshes()
     }
 
     func windowDidExitFullScreen(_ notification: Notification) {
-        DispatchQueue.main.async { [weak self] in
-            self?.layoutConsoleView()
-            self?.refreshConsoleView()
-        }
+        scheduleRefreshes()
     }
 
     private func layoutConsoleView() {
@@ -126,10 +124,22 @@ final class ConsoleDetachController: NSObject, ObservableObject, NSWindowDelegat
     }
 
     private func refreshConsoleView() {
+        layoutConsoleView()
+        extraRefresh?()
         guard let view = consoleView else { return }
-        refreshConsoleViewAfterResize(view)
         if let spice = view as? SpiceDisplayView {
-            spice.setNeedsDisplay(spice.bounds)
+            spice.refreshDisplay()
+        } else {
+            refreshConsoleViewAfterResize(view)
+        }
+    }
+
+    /// Fullscreen animation finishes asynchronously; refresh a few times to catch final bounds.
+    private func scheduleRefreshes() {
+        for delay in [0.0, 0.05, 0.15, 0.35] {
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+                self?.refreshConsoleView()
+            }
         }
     }
 
@@ -144,12 +154,14 @@ final class ConsoleDetachController: NSObject, ObservableObject, NSWindowDelegat
 /// Fills the detached window and keeps the console subview sized on layout / fullscreen.
 private final class ConsoleDetachContainerView: NSView {
     weak var consoleView: NSView?
+    var onLayout: (() -> Void)?
 
     override func layout() {
         super.layout()
         if let consoleView {
             consoleView.frame = bounds
         }
+        onLayout?()
     }
 
     override func resizeSubviews(withOldSize oldSize: NSSize) {
@@ -157,5 +169,6 @@ private final class ConsoleDetachContainerView: NSView {
         if let consoleView {
             consoleView.frame = bounds
         }
+        onLayout?()
     }
 }

@@ -22,17 +22,41 @@ public final class SpiceDisplayView: NSView {
 
     func primaryChanged(width: Int, height: Int) {
         fbWidth = width; fbHeight = height
-        needsDisplay = true
+        refreshDisplay()
     }
 
     public override func setFrameSize(_ newSize: NSSize) {
         super.setFrameSize(newSize)
-        needsDisplay = true
+        refreshDisplay()
     }
 
     public override func setBoundsSize(_ newSize: NSSize) {
         super.setBoundsSize(newSize)
-        needsDisplay = true
+        refreshDisplay()
+    }
+
+    /// Pushes the current framebuffer into the layer. Safe to call after reparenting
+    /// or fullscreen resize (draw-based rendering breaks when the view is layer-backed).
+    public func refreshDisplay() {
+        wantsLayer = true
+        guard let layer else { return }
+        layer.backgroundColor = NSColor.black.cgColor
+        layer.isOpaque = true
+        layer.masksToBounds = true
+        if let window {
+            layer.contentsScale = window.backingScaleFactor
+        }
+        guard fbWidth > 0, fbHeight > 0, bounds.width > 0, bounds.height > 0 else {
+            layer.contents = nil
+            return
+        }
+        let size = bounds.size
+        if size.width >= CGFloat(fbWidth), size.height >= CGFloat(fbHeight) {
+            layer.contentsGravity = .center
+        } else {
+            layer.contentsGravity = .resizeAspect
+        }
+        layer.contents = bridge?.makeImage()
     }
 
     /// Aspect-fit rect for the framebuffer within the current bounds (letterboxed).
@@ -41,22 +65,6 @@ public final class SpiceDisplayView: NSView {
         let scale = min(bounds.width / CGFloat(fbWidth), bounds.height / CGFloat(fbHeight))
         let w = CGFloat(fbWidth) * scale, h = CGFloat(fbHeight) * scale
         return CGRect(x: (bounds.width - w) / 2, y: (bounds.height - h) / 2, width: w, height: h)
-    }
-
-    // MARK: - Rendering
-
-    public override func draw(_ dirtyRect: NSRect) {
-        NSColor.black.setFill(); dirtyRect.fill()   // letterbox
-        guard let cg = bridge?.makeImage(),
-              let ctx = NSGraphicsContext.current?.cgContext else { return }
-        let rect = imageRect
-        // The framebuffer is top-down but CGImage memory is bottom-up, so flip Y.
-        ctx.saveGState()
-        ctx.interpolationQuality = .none
-        ctx.translateBy(x: rect.minX, y: rect.maxY)
-        ctx.scaleBy(x: 1, y: -1)
-        ctx.draw(cg, in: CGRect(origin: .zero, size: rect.size))
-        ctx.restoreGState()
     }
 
     // MARK: - Mouse
@@ -173,10 +181,12 @@ public final class SpiceDisplayView: NSView {
 
     public override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
-        guard let window else { return }
-        NotificationCenter.default.addObserver(
-            self, selector: #selector(focusLost),
-            name: NSWindow.didResignKeyNotification, object: window)
+        if let window {
+            NotificationCenter.default.addObserver(
+                self, selector: #selector(focusLost),
+                name: NSWindow.didResignKeyNotification, object: window)
+        }
+        DispatchQueue.main.async { [weak self] in self?.refreshDisplay() }
     }
 
     @objc private func focusLost() { releaseHeldModifiers() }

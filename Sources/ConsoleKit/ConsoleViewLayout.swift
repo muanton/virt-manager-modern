@@ -5,17 +5,24 @@ import RoyalVNCKit
 public func refreshConsoleViewAfterResize(_ view: NSView) {
     if let vnc = view as? VNCCAFramebufferView {
         vnc.refreshDisplayAfterResize()
-    } else {
-        view.setNeedsDisplay(view.bounds)
     }
 }
 
 extension VNCCAFramebufferView {
     /// Re-applies layer scaling when Auto Layout resizes the view (bypasses `frame` setter).
     func refreshDisplayAfterResize() {
-        // RoyalVNCKit only updates `contentsGravity` in the `frame` setter; constraint
-        // and fullscreen resizes go through `setFrameSize` instead.
+        guard settings.isScalingEnabled, let layer else { return }
+        if let window {
+            layer.contentsScale = window.backingScaleFactor
+        }
+        let size = bounds.size
+        if size.width >= framebufferSize.width, size.height >= framebufferSize.height {
+            layer.contentsGravity = .center
+        } else {
+            layer.contentsGravity = .resizeAspect
+        }
+        // RoyalVNCKit only updates gravity in the `frame` setter.
         let current = frame
-        frame = CGRect(origin: current.origin, size: bounds.size)
+        frame = CGRect(origin: current.origin, size: size)
     }
 }

@@ -41,6 +41,7 @@ public final class VNCSession: ObservableObject {
     @Published public private(set) var framebufferView: NSView?
 
     private var fbView: VNCCAFramebufferView?
+    private var lastFramebuffer: VNCFramebuffer?
     private var tunnel: SSHTunnel?
     private var connection: VNCConnection?
     private var coordinator: VNCCoordinator?
@@ -99,8 +100,17 @@ public final class VNCSession: ObservableObject {
         tunnel?.stop()
         tunnel = nil
         fbView = nil
+        lastFramebuffer = nil
         framebufferView = nil
         status = .idle
+    }
+
+    /// Re-pushes the framebuffer after the view is reparented or resized (detach / fullscreen).
+    public func refreshDisplay() {
+        guard let fbView, let connection, let fb = lastFramebuffer else { return }
+        fbView.connection(connection, didUpdateFramebuffer: fb,
+                          x: 0, y: 0, width: fb.size.width, height: fb.size.height)
+        refreshConsoleViewAfterResize(fbView)
     }
 
     deinit {
@@ -132,6 +142,7 @@ public final class VNCSession: ObservableObject {
     }
 
     func installFramebuffer(_ connection: VNCConnection, _ framebuffer: VNCFramebuffer) {
+        lastFramebuffer = framebuffer
         let view = VNCCAFramebufferView(
             frame: CGRect(origin: .zero, size: framebuffer.size.cgSize),
             framebuffer: framebuffer,
@@ -143,6 +154,7 @@ public final class VNCSession: ObservableObject {
 
     func forwardUpdate(_ connection: VNCConnection, _ fb: VNCFramebuffer,
                        _ x: UInt16, _ y: UInt16, _ w: UInt16, _ h: UInt16) {
+        lastFramebuffer = fb
         fbView?.connection(connection, didUpdateFramebuffer: fb, x: x, y: y, width: w, height: h)
     }
 

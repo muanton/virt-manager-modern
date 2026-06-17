@@ -81,7 +81,11 @@ struct ConsoleTab: View {
     private func detachConsole() {
         let view = spice.displayView ?? vnc.framebufferView
         guard let view else { return }
-        detach.detach(view: view, title: "\(domain.name) — Console")
+        detach.detach(view: view, title: "\(domain.name) — Console") {
+            if view === self.vnc.framebufferView {
+                self.vnc.refreshDisplay()
+            }
+        }
     }
 
     // MARK: - QXL warning
