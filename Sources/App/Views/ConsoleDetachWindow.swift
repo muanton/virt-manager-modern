@@ -1,5 +1,7 @@
 import AppKit
 import SwiftUI
+import ConsoleKit
+import SpiceKit
 
 /// Reparents a console `NSView` into a standalone window (detach / reattach).
 @MainActor
@@ -8,6 +10,7 @@ final class ConsoleDetachController: NSObject, ObservableObject, NSWindowDelegat
 
     private var window: NSWindow?
     private weak var consoleView: NSView?
+    private weak var container: ConsoleDetachContainerView?
     private weak var placeholder: NSView?
     private var constraints: [NSLayoutConstraint] = []
 
@@ -41,25 +44,28 @@ final class ConsoleDetachController: NSObject, ObservableObject, NSWindowDelegat
         w.isReleasedWhenClosed = false
         w.contentMinSize = NSSize(width: 320, height: 240)
         w.backgroundColor = .black
+        w.collectionBehavior = [.fullScreenPrimary, .managed]
 
-        let container = NSView(frame: w.contentView?.bounds ?? .zero)
-        container.autoresizingMask = [.width, .height]
-        w.contentView = container
+        let box = ConsoleDetachContainerView(frame: w.contentView?.bounds ?? .zero)
+        box.autoresizingMask = [.width, .height]
+        box.consoleView = view
+        w.contentView = box
+        container = box
 
-        view.translatesAutoresizingMaskIntoConstraints = false
-        container.addSubview(view)
-        NSLayoutConstraint.activate([
-            view.leadingAnchor.constraint(equalTo: container.leadingAnchor),
-            view.trailingAnchor.constraint(equalTo: container.trailingAnchor),
-            view.topAnchor.constraint(equalTo: container.topAnchor),
-            view.bottomAnchor.constraint(equalTo: container.bottomAnchor),
-        ])
+        view.translatesAutoresizingMaskIntoConstraints = true
+        view.autoresizingMask = [.width, .height]
+        view.frame = box.bounds
+        box.addSubview(view)
 
         window = w
         isDetached = true
         w.center()
         w.makeKeyAndOrderFront(nil)
-        DispatchQueue.main.async { view.window?.makeFirstResponder(view) }
+        DispatchQueue.main.async { [weak self] in
+            self?.layoutConsoleView()
+            self?.refreshConsoleView()
+            view.window?.makeFirstResponder(view)
+        }
     }
 
     func reattach() {
@@ -70,13 +76,17 @@ final class ConsoleDetachController: NSObject, ObservableObject, NSWindowDelegat
         view.removeFromSuperview()
         ph.removeFromSuperview()
         placeholder = nil
+        container = nil
 
         parent.addSubview(view)
         NSLayoutConstraint.activate(constraints)
         constraints = []
         consoleView = nil
         closeWindow()
-        DispatchQueue.main.async { view.window?.makeFirstResponder(view) }
+        DispatchQueue.main.async {
+            refreshConsoleViewAfterResize(view)
+            view.window?.makeFirstResponder(view)
+        }
     }
 
     func toggleFullscreen() {
@@ -87,10 +97,65 @@ final class ConsoleDetachController: NSObject, ObservableObject, NSWindowDelegat
         reattach()
     }
 
+    func windowDidResize(_ notification: Notification) {
+        layoutConsoleView()
+        refreshConsoleView()
+    }
+
+    func windowDidEnterFullScreen(_ notification: Notification) {
+        DispatchQueue.main.async { [weak self] in
+            self?.layoutConsoleView()
+            self?.refreshConsoleView()
+        }
+    }
+
+    func windowDidExitFullScreen(_ notification: Notification) {
+        DispatchQueue.main.async { [weak self] in
+            self?.layoutConsoleView()
+            self?.refreshConsoleView()
+        }
+    }
+
+    private func layoutConsoleView() {
+        guard let view = consoleView, let box = container ?? window?.contentView as? ConsoleDetachContainerView else {
+            return
+        }
+        if view.frame.size != box.bounds.size || view.frame.origin != box.bounds.origin {
+            view.frame = box.bounds
+        }
+    }
+
+    private func refreshConsoleView() {
+        guard let view = consoleView else { return }
+        refreshConsoleViewAfterResize(view)
+        if let spice = view as? SpiceDisplayView {
+            spice.setNeedsDisplay(spice.bounds)
+        }
+    }
+
     private func closeWindow() {
         window?.delegate = nil
         window?.orderOut(nil)
         window = nil
         isDetached = false
+    }
+}
+
+/// Fills the detached window and keeps the console subview sized on layout / fullscreen.
+private final class ConsoleDetachContainerView: NSView {
+    weak var consoleView: NSView?
+
+    override func layout() {
+        super.layout()
+        if let consoleView {
+            consoleView.frame = bounds
+        }
+    }
+
+    override func resizeSubviews(withOldSize oldSize: NSSize) {
+        super.resizeSubviews(withOldSize: oldSize)
+        if let consoleView {
+            consoleView.frame = bounds
+        }
     }
 }

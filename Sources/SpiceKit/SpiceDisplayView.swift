@@ -25,6 +25,16 @@ public final class SpiceDisplayView: NSView {
         needsDisplay = true
     }
 
+    public override func setFrameSize(_ newSize: NSSize) {
+        super.setFrameSize(newSize)
+        needsDisplay = true
+    }
+
+    public override func setBoundsSize(_ newSize: NSSize) {
+        super.setBoundsSize(newSize)
+        needsDisplay = true
+    }
+
     /// Aspect-fit rect for the framebuffer within the current bounds (letterboxed).
     private var imageRect: CGRect {
         guard fbWidth > 0, fbHeight > 0, bounds.width > 0, bounds.height > 0 else { return bounds }
