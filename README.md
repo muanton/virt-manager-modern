@@ -39,17 +39,19 @@ storage handled natively.
 - SSH tunnels for SPICE/VNC are created automatically per console.
 - Quality-of-life extras virt-manager lacks: **ISO upload from your Mac** over
   libvirt streams (no scp), guest IPs with one-click copy, live CPU/memory
-  stats in the VM list, guard rails in hardware editing (controllers in use
-  can't be removed, duplicate singletons can't be added), automatic installer
-  ISO eject on power actions.
+  stats in the VM list, VM search/filter, keyboard shortcuts for lifecycle
+  actions, guard rails in hardware editing (controllers in use can't be
+  removed, duplicate singletons can't be added), automatic installer ISO eject
+  on power actions, host dashboard, storage/network managers.
 
 **Where original virt-manager still wins:**
 
 - Maturity: ~20 years of edge cases; this app is young.
-- Breadth: host network/storage-pool editing, migration between hosts,
+- Breadth: migration between hosts,
   multiple hypervisor drivers (Xen, LXC, …), unattended installs backed by the
   full libosinfo database (this app ships a curated OS catalog instead).
-- Console extras: audio, USB redirection, and clipboard sharing in SPICE.
+- Console extras: audio and USB redirection in SPICE (clipboard sharing is
+  supported here for UTF-8 text).
 - Cross-platform and packaged by every Linux distribution; this app is
   macOS-14+/Apple-Silicon only.
 
@@ -90,8 +92,15 @@ a 20-year-old C virtualization API, with its own reproducible toolchain.
   media can be ejected live; power actions auto-eject installers so they
   don't boot again.
 - **Live stats & guest IPs**: CPU% and memory per running VM in the sidebar
-  and Overview; guest IP addresses (guest agent or DHCP leases) with one-click
-  copy.
+  and Overview (event-driven VM list, stats polled every 5s); guest IP
+  addresses (guest agent or DHCP leases) with one-click copy; QEMU guest agent
+  status badge on Overview.
+- **Host dashboard**: per-connection host info (CPU model, memory, VM counts,
+  libvirt version) from the connection menu.
+- **Storage pool manager**: start/stop/rescan pools, browse volumes, delete
+  volumes; volume lists refresh on libvirt storage-pool events.
+- **Virtual network manager**: list/start/stop/delete networks, one-click
+  default NAT network setup.
 - **Snapshots**: create (incl. memory while running), revert, delete — shown
   as a tree with the current marker.
 - **Clone VM** with per-disk Clone/Share/Skip, and **ISO upload** from the Mac
@@ -137,8 +146,9 @@ for the details (and for bumping dependency versions).
 
 ## Status & limitations
 
-- VNC and SPICE consoles (scaled-to-fit, full keyboard/mouse). No audio, USB
-  redirection, clipboard sharing, multi-monitor, or RDP yet.
+- VNC and SPICE consoles (scaled-to-fit, full keyboard/mouse, detach to a
+  separate window with fullscreen). SPICE clipboard sync for UTF-8 text.
+  No audio, USB redirection, multi-monitor, or RDP yet.
 - VMs using virtio-gpu **GL scanout** (`<gl enable='yes'>`) aren't rendered.
 - The app bundle is **ad-hoc signed**: on another Mac, right-click → Open the
   first time. Proper distribution would need Developer ID + notarization.

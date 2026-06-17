@@ -1,6 +1,8 @@
 #include "spice_shim.h"
 
 #include <spice-client.h>
+#include <channel-main.h>
+#include <spice/vd_agent.h>
 #include <glib.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -23,6 +25,10 @@ struct VMMSpiceSession {
 
     int announced_connected;
     int started;
+
+    int clipboard_enabled;
+    int host_clip_grabbed;
+    guint clipboard_release_src;
 };
 
 /* ---- Shared GLib runner ------------------------------------------------- *
@@ -122,6 +128,101 @@ static void on_channel_event(SpiceChannel *channel, SpiceChannelEvent event,
     }
 }
 
+/* ---- clipboard (UTF-8 text via vdagent) ---- */
+
+#define CLIPBOARD_RELEASE_DELAY_MS 500
+
+static gboolean clipboard_release_timeout(gpointer data) {
+    VMMSpiceSession *s = data;
+    s->clipboard_release_src = 0;
+    if (s->cb.clipboard_guest_release)
+        s->cb.clipboard_guest_release(s->cb.ctx, VD_AGENT_CLIPBOARD_SELECTION_CLIPBOARD);
+    return G_SOURCE_REMOVE;
+}
+
+static gboolean on_clipboard_grab(SpiceMainChannel *main, guint selection,
+                                  guint32 *types, guint32 ntypes,
+                                  gpointer user_data) {
+    (void)main;
+    VMMSpiceSession *s = user_data;
+    if (s->clipboard_release_src) {
+        g_source_remove(s->clipboard_release_src);
+        s->clipboard_release_src = 0;
+    }
+    if (!s->clipboard_enabled || !s->cb.clipboard_guest_grab)
+        return TRUE;
+    s->cb.clipboard_guest_grab(s->cb.ctx, selection, types, (int)ntypes);
+    /* Guest grabbed — request UTF-8 so we can mirror it to the Mac pasteboard. */
+    for (guint i = 0; i < ntypes; i++) {
+        if (types[i] == VD_AGENT_CLIPBOARD_UTF8_TEXT) {
+            spice_main_channel_clipboard_selection_request(
+                SPICE_MAIN_CHANNEL(s->main_channel),
+                selection, VD_AGENT_CLIPBOARD_UTF8_TEXT);
+            break;
+        }
+    }
+    return TRUE;
+}
+
+static gboolean on_clipboard_request(SpiceMainChannel *main, guint selection,
+                                     guint type, gpointer user_data) {
+    (void)main;
+    VMMSpiceSession *s = user_data;
+    if (!s->clipboard_enabled || !s->host_clip_grabbed || !s->cb.clipboard_guest_request)
+        return FALSE;
+    s->cb.clipboard_guest_request(s->cb.ctx, selection, type);
+    return TRUE;
+}
+
+static void on_clipboard_release(SpiceMainChannel *main, guint selection,
+                                 gpointer user_data) {
+    (void)main;
+    VMMSpiceSession *s = user_data;
+    if (!s->clipboard_enabled)
+        return;
+    if (s->clipboard_release_src)
+        g_source_remove(s->clipboard_release_src);
+    s->clipboard_release_src = g_timeout_add(CLIPBOARD_RELEASE_DELAY_MS,
+                                             clipboard_release_timeout, s);
+    (void)selection;
+}
+
+static void on_clipboard_data(SpiceMainChannel *main, guint selection,
+                              guint type, gpointer data, guint size,
+                              gpointer user_data) {
+    (void)main;
+    VMMSpiceSession *s = user_data;
+    if (!s->clipboard_enabled || !s->cb.clipboard_guest_data || !data || size == 0)
+        return;
+    s->cb.clipboard_guest_data(s->cb.ctx, selection, type, (const uint8_t *)data, size);
+}
+
+static gboolean host_grab_cb(gpointer data) {
+    VMMSpiceSession *s = data;
+    if (!s->main_channel)
+        return G_SOURCE_REMOVE;
+    guint32 types[] = { VD_AGENT_CLIPBOARD_UTF8_TEXT };
+    spice_main_channel_clipboard_selection_grab(
+        SPICE_MAIN_CHANNEL(s->main_channel),
+        VD_AGENT_CLIPBOARD_SELECTION_CLIPBOARD, types, 1);
+    s->host_clip_grabbed = 1;
+    return G_SOURCE_REMOVE;
+}
+
+static gboolean host_notify_cb(gpointer data) {
+    typedef struct { VMMSpiceSession *s; uint32_t type; GByteArray *bytes; } NotifyOp;
+    NotifyOp *op = data;
+    if (op->s->main_channel && op->bytes && op->bytes->len > 0) {
+        spice_main_channel_clipboard_selection_notify(
+            SPICE_MAIN_CHANNEL(op->s->main_channel),
+            VD_AGENT_CLIPBOARD_SELECTION_CLIPBOARD,
+            op->type, op->bytes->data, op->bytes->len);
+    }
+    if (op->bytes) g_byte_array_free(op->bytes, TRUE);
+    g_free(op);
+    return G_SOURCE_REMOVE;
+}
+
 /* ---- session channel discovery ---- */
 
 static void on_channel_new(SpiceSession *session, SpiceChannel *channel,
@@ -136,6 +237,14 @@ static void on_channel_new(SpiceSession *session, SpiceChannel *channel,
 
     if (type == SPICE_CHANNEL_MAIN) {
         s->main_channel = channel;
+        g_signal_connect(channel, "main-clipboard-selection-grab",
+                         G_CALLBACK(on_clipboard_grab), s);
+        g_signal_connect(channel, "main-clipboard-selection-request",
+                         G_CALLBACK(on_clipboard_request), s);
+        g_signal_connect(channel, "main-clipboard-selection-release",
+                         G_CALLBACK(on_clipboard_release), s);
+        g_signal_connect(channel, "main-clipboard-selection",
+                         G_CALLBACK(on_clipboard_data), s);
     } else if (type == SPICE_CHANNEL_DISPLAY) {
         int id = -1;
         g_object_get(channel, "channel-id", &id, NULL);
@@ -203,7 +312,12 @@ static gboolean stop_cb(gpointer data) {
         g_object_unref(s->session);
         s->session = NULL;
     }
+    if (s->clipboard_release_src) {
+        g_source_remove(s->clipboard_release_src);
+        s->clipboard_release_src = 0;
+    }
     s->inputs = NULL; s->display = NULL; s->main_channel = NULL;
+    s->host_clip_grabbed = 0;
     g_mutex_lock(&op->m);
     op->done = 1;
     g_cond_signal(&op->c);
@@ -316,6 +430,29 @@ void vmm_spice_mouse_button(VMMSpiceSession *s, int button, int button_mask, int
 
 void vmm_spice_mouse_wheel(VMMSpiceSession *s, int up, int button_mask) {
     invoke(s, wheel_cb, (InputEvent){ .a = up, .b = button_mask });
+}
+
+void vmm_spice_clipboard_enable(VMMSpiceSession *s, int enabled) {
+    if (!s) return;
+    s->clipboard_enabled = enabled ? 1 : 0;
+    if (!enabled) s->host_clip_grabbed = 0;
+}
+
+void vmm_spice_clipboard_host_grab(VMMSpiceSession *s) {
+    if (!s || !s->clipboard_enabled || !g_runner_ctx) return;
+    g_main_context_invoke(g_runner_ctx, host_grab_cb, s);
+}
+
+void vmm_spice_clipboard_host_notify(VMMSpiceSession *s, uint32_t type,
+                                     const uint8_t *data, size_t size) {
+    if (!s || !s->clipboard_enabled || !data || size == 0 || !g_runner_ctx) return;
+    typedef struct { VMMSpiceSession *s; uint32_t type; GByteArray *bytes; } NotifyOp;
+    NotifyOp *op = g_new0(NotifyOp, 1);
+    op->s = s;
+    op->type = type;
+    op->bytes = g_byte_array_sized_new((guint)size);
+    g_byte_array_append(op->bytes, data, (guint)size);
+    g_main_context_invoke(g_runner_ctx, host_notify_cb, op);
 }
 
 const char *vmm_spice_version(void) {

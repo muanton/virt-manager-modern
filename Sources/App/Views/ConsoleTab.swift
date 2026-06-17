@@ -21,6 +21,7 @@ struct ConsoleTab: View {
     @State private var switching = false
     @State private var switchResult: String?
     @State private var connectedForDomainID: Int32 = -2
+    @StateObject private var detach = ConsoleDetachController()
 
     var body: some View {
         // Everything — banner included — lives inside the GeometryReader, which
@@ -47,6 +48,39 @@ struct ConsoleTab: View {
             .frame(width: geo.size.width, height: geo.size.height)
         }
         .task(id: taskKey) { await prepare() }
+        .onDisappear { detach.reattach() }
+        .toolbar { consoleToolbar }
+    }
+
+    @ToolbarContentBuilder
+    private var consoleToolbar: some ToolbarContent {
+        if consoleConnected, !showSerial {
+            ToolbarItemGroup(placement: .automatic) {
+                if detach.isDetached {
+                    Button { detach.reattach() } label: {
+                        Label("Reattach", systemImage: "arrow.down.right.and.arrow.up.left")
+                    }
+                    .help("Move the console back into this tab")
+                } else if spice.status == .connected || vnc.status == .connected {
+                    Button { detachConsole() } label: {
+                        Label("Detach", systemImage: "arrow.up.left.and.arrow.down.right")
+                    }
+                    .help("Open the console in a separate window")
+                }
+                if detach.isDetached {
+                    Button { detach.toggleFullscreen() } label: {
+                        Label("Fullscreen", systemImage: "arrow.up.left.and.bottomright.rectangle")
+                    }
+                    .help("Toggle fullscreen on the detached window")
+                }
+            }
+        }
+    }
+
+    private func detachConsole() {
+        let view = spice.displayView ?? vnc.framebufferView
+        guard let view else { return }
+        detach.detach(view: view, title: "\(domain.name) — Console")
     }
 
     // MARK: - QXL warning
@@ -111,6 +145,9 @@ struct ConsoleTab: View {
         } else if showSerial {
             SerialConsoleView(session: session, uuid: domain.uuid)
                 .id(domain.uuid)
+        } else if detach.isDetached {
+            ContentUnavailableView("Console Detached", systemImage: "rectangle.on.rectangle",
+                description: Text("The display is open in a separate window. Click Reattach to bring it back here."))
         } else if spiceActive {
             spiceContent
         } else if vncActive {
@@ -220,6 +257,7 @@ struct ConsoleTab: View {
         let needsReconnect = force || connectedForDomainID != domain.domainID
         if !needsReconnect, consoleActive { return }
 
+        if detach.isDetached { detach.reattach() }
         vnc.stop(); spice.stop()
         connectedForDomainID = domain.domainID
 

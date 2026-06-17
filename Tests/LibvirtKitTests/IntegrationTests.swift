@@ -50,4 +50,40 @@ final class IntegrationTests: XCTestCase {
         let deregister = try await conn.registerDomainEvents { _, _ in }
         deregister()
     }
+
+    func testStoragePoolEventRegistration() async throws {
+        let conn = try await LibvirtConnection.open(uri: uri)
+        defer { conn.close() }
+        let deregister = try await conn.registerStoragePoolEvents(onLifecycle: { _, _ in },
+                                                                  onRefresh: { _ in })
+        deregister()
+    }
+
+    func testHostSummary() async throws {
+        let conn = try await LibvirtConnection.open(uri: uri)
+        defer { conn.close() }
+        let summary = try await conn.hostSummary()
+        XCTAssertFalse(summary.libvirtVersion.isEmpty)
+        XCTAssertGreaterThan(summary.node.cpus, 0)
+        XCTAssertGreaterThan(summary.domainCount, 0)
+    }
+
+    func testListNetworks() async throws {
+        let conn = try await LibvirtConnection.open(uri: uri)
+        defer { conn.close() }
+        _ = try await conn.listNetworks()
+    }
+
+    func testStoragePoolRefresh() async throws {
+        let conn = try await LibvirtConnection.open(uri: uri)
+        defer { conn.close() }
+        let pools = try await conn.listStoragePools()
+        guard let pool = pools.first else {
+            XCTFail("No storage pools in test driver")
+            return
+        }
+        if pool.active {
+            _ = try await conn.listVolumes()
+        }
+    }
 }

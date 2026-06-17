@@ -25,6 +25,13 @@ typedef struct {
     /* connected = 1 when the console is usable; 0 on disconnect/error.
        `error` is NULL unless a failure occurred. */
     void (*state)(void *ctx, int connected, const char *error);
+    /* SPICE clipboard (UTF-8 text). Invoked on the runner thread. */
+    void (*clipboard_guest_grab)(void *ctx, unsigned selection,
+                                 const uint32_t *types, int ntypes);
+    void (*clipboard_guest_request)(void *ctx, unsigned selection, uint32_t type);
+    void (*clipboard_guest_release)(void *ctx, unsigned selection);
+    void (*clipboard_guest_data)(void *ctx, unsigned selection, uint32_t type,
+                                 const uint8_t *data, size_t size);
 } VMMSpiceCallbacks;
 
 /* Create a session for host:port (typically 127.0.0.1:<tunnel port>). */
@@ -45,6 +52,11 @@ void vmm_spice_key(VMMSpiceSession *s, uint32_t scancode, int down);
 void vmm_spice_mouse_motion_abs(VMMSpiceSession *s, int x, int y, int button_mask);
 void vmm_spice_mouse_button(VMMSpiceSession *s, int button, int button_mask, int down);
 void vmm_spice_mouse_wheel(VMMSpiceSession *s, int up, int button_mask);
+
+void vmm_spice_clipboard_enable(VMMSpiceSession *s, int enabled);
+void vmm_spice_clipboard_host_grab(VMMSpiceSession *s);
+void vmm_spice_clipboard_host_notify(VMMSpiceSession *s, uint32_t type,
+                                     const uint8_t *data, size_t size);
 
 const char *vmm_spice_version(void);
 

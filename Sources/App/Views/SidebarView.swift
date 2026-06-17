@@ -12,13 +12,18 @@ struct SidebarView: View {
 
     @State private var searchText = ""
     @State private var storageSession: ConnectionSession?
+    @State private var networksSession: ConnectionSession?
+    @State private var hostSession: ConnectionSession?
 
     var body: some View {
         List(selection: $selection) {
             ForEach(appState.sessions) { session in
                 SessionSection(session: session, searchText: searchText, selection: $selection,
                                onEdit: onEdit, onNewVM: onNewVM, onDeleteVM: onDeleteVM,
-                               onCloneVM: onCloneVM, onStorage: { storageSession = session })
+                               onCloneVM: onCloneVM,
+                               onStorage: { storageSession = session },
+                               onNetworks: { networksSession = session },
+                               onHost: { hostSession = session })
             }
         }
         .listStyle(.sidebar)
@@ -38,6 +43,12 @@ struct SidebarView: View {
         }
         .sheet(item: $storageSession) { session in
             StoragePoolsSheet(session: session)
+        }
+        .sheet(item: $networksSession) { session in
+            NetworksSheet(session: session)
+        }
+        .sheet(item: $hostSession) { session in
+            HostDashboardSheet(session: session)
         }
     }
 
@@ -70,6 +81,8 @@ private struct SessionSection: View {
     var onDeleteVM: (ConnectionSession, DomainSummary) -> Void
     var onCloneVM: (ConnectionSession, DomainSummary) -> Void
     var onStorage: () -> Void
+    var onNetworks: () -> Void
+    var onHost: () -> Void
 
     private var filteredDomains: [DomainSummary] {
         let q = searchText.trimmingCharacters(in: .whitespaces).lowercased()
@@ -162,7 +175,9 @@ private struct SessionSection: View {
     @ViewBuilder private var contextMenu: some View {
         if session.isConnected {
             Button("New VM…") { onNewVM(session) }
+            Button("Host Info…") { onHost() }
             Button("Manage Storage…") { onStorage() }
+            Button("Manage Networks…") { onNetworks() }
             Divider()
             Button("Disconnect") { session.disconnect() }
             Button("Reconnect") { reconnect() }

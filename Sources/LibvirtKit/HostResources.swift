@@ -7,6 +7,7 @@ public struct VirtNetwork: Identifiable, Sendable, Hashable {
     public let name: String
     public let bridge: String?
     public let active: Bool
+    public let persistent: Bool
     public var id: String { name }
 }
 
@@ -86,6 +87,20 @@ public struct NodeDevice: Identifiable, Sendable, Hashable {
 // MARK: - Queries
 
 extension LibvirtConnection {
+    /// A minimal NAT network suitable for most QEMU/KVM guests.
+    public static let defaultNATNetworkXML = """
+    <network>
+      <name>default</name>
+      <bridge name='virbr0' stp='on' delay='0'/>
+      <forward mode='nat'/>
+      <ip address='192.168.122.1' netmask='255.255.255.0'>
+        <dhcp>
+          <range start='192.168.122.2' end='192.168.122.254'/>
+        </dhcp>
+      </ip>
+    </network>
+    """
+
     public func listNetworks() async throws -> [VirtNetwork] {
         try await run { conn in
             var array: UnsafeMutablePointer<OpaquePointer?>?
@@ -102,7 +117,8 @@ extension LibvirtConnection {
                 var bridge: String?
                 if let b = virNetworkGetBridgeName(net) { bridge = String(cString: b); free(b) }
                 out.append(VirtNetwork(name: name, bridge: bridge,
-                                       active: virNetworkIsActive(net) == 1))
+                                       active: virNetworkIsActive(net) == 1,
+                                       persistent: virNetworkIsPersistent(net) == 1))
             }
             return out.sorted { $0.name < $1.name }
         }
@@ -253,6 +269,75 @@ extension LibvirtConnection {
             }
             return out.sorted { $0.label < $1.label }
         }
+    }
+
+    public func networkXML(name: String) async throws -> String {
+        try await run { conn in
+            guard let net = virNetworkLookupByName(conn, name) else {
+                throw LibvirtError.lastError(fallback: "Network \(name) not found")
+            }
+            defer { virNetworkFree(net) }
+            guard let x = virNetworkGetXMLDesc(net, 0) else {
+                throw LibvirtError.lastError(fallback: "Failed to read network XML")
+            }
+            defer { free(x) }
+            return String(cString: x)
+        }
+    }
+
+    public func defineNetwork(xml: String) async throws -> VirtNetwork {
+        try await run { conn in
+            guard let net = virNetworkDefineXML(conn, xml) else {
+                throw LibvirtError.lastError(fallback: "Failed to define network")
+            }
+            defer { virNetworkFree(net) }
+            return Self.networkSummary(net)
+        }
+    }
+
+    public func setNetworkActive(name: String, active: Bool) async throws {
+        try await run { conn in
+            guard let net = virNetworkLookupByName(conn, name) else {
+                throw LibvirtError.lastError(fallback: "Network \(name) not found")
+            }
+            defer { virNetworkFree(net) }
+            let rc: Int32
+            if active {
+                rc = virNetworkIsActive(net) == 1 ? 0 : virNetworkCreate(net)
+            } else {
+                rc = virNetworkIsActive(net) == 1 ? virNetworkDestroy(net) : 0
+            }
+            guard rc == 0 else {
+                throw LibvirtError.lastError(fallback: active
+                    ? "Failed to start network \(name)" : "Failed to stop network \(name)")
+            }
+        }
+    }
+
+    public func undefineNetwork(name: String) async throws {
+        try await run { conn in
+            guard let net = virNetworkLookupByName(conn, name) else {
+                throw LibvirtError.lastError(fallback: "Network \(name) not found")
+            }
+            defer { virNetworkFree(net) }
+            if virNetworkIsActive(net) == 1 {
+                guard virNetworkDestroy(net) == 0 else {
+                    throw LibvirtError.lastError(fallback: "Failed to stop network \(name)")
+                }
+            }
+            guard virNetworkUndefine(net) == 0 else {
+                throw LibvirtError.lastError(fallback: "Failed to undefine network \(name)")
+            }
+        }
+    }
+
+    private static func networkSummary(_ net: OpaquePointer) -> VirtNetwork {
+        let name = virNetworkGetName(net).map { String(cString: $0) } ?? "?"
+        var bridge: String?
+        if let b = virNetworkGetBridgeName(net) { bridge = String(cString: b); free(b) }
+        return VirtNetwork(name: name, bridge: bridge,
+                           active: virNetworkIsActive(net) == 1,
+                           persistent: virNetworkIsPersistent(net) == 1)
     }
 
     public func domainCapabilities() async throws -> DomainCaps {

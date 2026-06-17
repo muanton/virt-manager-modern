@@ -34,10 +34,12 @@ final class ConnectionSession: ObservableObject, Identifiable {
     @Published private(set) var usbDevices: [NodeDevice] = []
     @Published private(set) var pciDevices: [NodeDevice] = []
     @Published private(set) var domainCaps: DomainCaps = .fallback
+    @Published private(set) var hostSummary: HostSummary?
     private var hostResourcesLoaded = false
 
     private var conn: LibvirtConnection?
     private var deregisterEvents: (() -> Void)?
+    private var deregisterPoolEvents: (() -> Void)?
     private var pollTask: Task<Void, Never>?
 
     init(config: ConnectionConfig) {
@@ -55,7 +57,9 @@ final class ConnectionSession: ObservableObject, Identifiable {
             conn = c
             status = .connected
             try await startDomainEvents(on: c)
+            try await startStoragePoolEvents(on: c)
             await refreshDomainList()
+            await refreshHostSummary()
             startPolling()
             VMMLog.session.info("Connected to \(self.config.name, privacy: .public) (\(self.domains.count) VMs)")
         } catch {
@@ -70,10 +74,13 @@ final class ConnectionSession: ObservableObject, Identifiable {
         pollTask = nil
         deregisterEvents?()
         deregisterEvents = nil
+        deregisterPoolEvents?()
+        deregisterPoolEvents = nil
         conn?.close()
         conn = nil
         domains = []
         pools = []
+        hostSummary = nil
         status = .disconnected
     }
 
@@ -101,9 +108,11 @@ final class ConnectionSession: ObservableObject, Identifiable {
             } else {
                 Task { await refreshDomainList() }
             }
+            Task { await refreshHostSummary() }
         case .defined:
             if let s = summary { upsertDomain(s) }
             else { Task { await refreshDomainList() } }
+            Task { await refreshHostSummary() }
         default:
             if let s = summary { upsertDomain(s) }
             else { Task { await refreshDomainList() } }
@@ -125,6 +134,8 @@ final class ConnectionSession: ObservableObject, Identifiable {
         VMMLog.session.notice("Transport lost for \(self.config.name, privacy: .public) — reconnecting")
         deregisterEvents?()
         deregisterEvents = nil
+        deregisterPoolEvents?()
+        deregisterPoolEvents = nil
         dead.close()
         conn = nil
         stats = [:]
@@ -140,7 +151,9 @@ final class ConnectionSession: ObservableObject, Identifiable {
             status = .connected
             hostResourcesLoaded = false
             try await startDomainEvents(on: c)
+            try await startStoragePoolEvents(on: c)
             await refreshDomainList()
+            await refreshHostSummary()
             VMMLog.session.info("Reconnected to \(self.config.name, privacy: .public)")
         } catch { /* poll loop retries */ }
     }
@@ -152,6 +165,27 @@ final class ConnectionSession: ObservableObject, Identifiable {
                 self?.handleDomainEvent(kind, summary: summary)
             }
         }
+    }
+
+    private func startStoragePoolEvents(on conn: LibvirtConnection) async throws {
+        deregisterPoolEvents?()
+        deregisterPoolEvents = try await conn.registerStoragePoolEvents(
+            onLifecycle: { [weak self] _, _ in
+                Task { @MainActor [weak self] in await self?.handleStoragePoolChange() }
+            },
+            onRefresh: { [weak self] _ in
+                Task { @MainActor [weak self] in await self?.handleStoragePoolChange() }
+            })
+    }
+
+    private func handleStoragePoolChange() async {
+        guard conn != nil else { return }
+        try? await loadStoragePools()
+    }
+
+    func refreshHostSummary() async {
+        guard let conn else { return }
+        hostSummary = try? await conn.hostSummary()
     }
 
     private func refreshStats() async {
@@ -412,6 +446,26 @@ final class ConnectionSession: ObservableObject, Identifiable {
     func deleteVolume(path: String) async throws {
         try await requireConnection().deleteVolume(path: path)
         volumes.removeAll { $0.path == path }
+    }
+
+    func loadNetworks() async throws {
+        networks = try await requireConnection().listNetworks()
+        hostResourcesLoaded = true
+    }
+
+    func defineNetwork(xml: String) async throws {
+        _ = try await requireConnection().defineNetwork(xml: xml)
+        try await loadNetworks()
+    }
+
+    func setNetworkActive(name: String, active: Bool) async throws {
+        try await requireConnection().setNetworkActive(name: name, active: active)
+        try await loadNetworks()
+    }
+
+    func undefineNetwork(name: String) async throws {
+        try await requireConnection().undefineNetwork(name: name)
+        try await loadNetworks()
     }
 
     var storagePools: [String] {

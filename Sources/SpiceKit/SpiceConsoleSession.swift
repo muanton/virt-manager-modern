@@ -18,6 +18,7 @@ public final class SpiceConsoleSession: ObservableObject {
 
     private var handle: OpaquePointer?            // VMMSpiceSession*
     private let bridge = SpiceBridge()
+    private let clipboard = SpiceClipboard()
     private var tunnel: SSHTunnel?
 
     public init() {}
@@ -51,6 +52,7 @@ public final class SpiceConsoleSession: ObservableObject {
         view.session = self
         bridge.view = view
         bridge.session = self
+        bridge.clipboard = clipboard
         displayView = view
 
         var cb = VMMSpiceCallbacks()
@@ -59,12 +61,18 @@ public final class SpiceConsoleSession: ObservableObject {
         cb.primary_destroy = spicePrimaryDestroy
         cb.invalidate = spiceInvalidate
         cb.state = spiceState
+        cb.clipboard_guest_grab = spiceClipboardGrab
+        cb.clipboard_guest_request = spiceClipboardRequest
+        cb.clipboard_guest_release = spiceClipboardRelease
+        cb.clipboard_guest_data = spiceClipboardData
 
         handle = vmm_spice_session_create(host, Int32(port), target.password, cb)
         vmm_spice_session_start(handle)
+        clipboard.start(session: self, handle: handle)
     }
 
     public func stop() {
+        clipboard.stop()
         if let handle { vmm_spice_session_stop(handle) }
         handle = nil
         bridge.cleanup()

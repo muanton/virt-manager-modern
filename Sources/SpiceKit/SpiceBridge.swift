@@ -15,6 +15,7 @@ final class SpiceBridge: @unchecked Sendable {
 
     weak var view: SpiceDisplayView?
     weak var session: SpiceConsoleSession?
+    weak var clipboard: SpiceClipboard?
 
     // MARK: - Called from the SPICE thread
 
@@ -120,4 +121,28 @@ let spiceState: @convention(c) (
     DispatchQueue.main.async { [weak session = bridge.session] in
         session?.handleState(connected: connected != 0, error: message)
     }
+}
+
+let spiceClipboardGrab: @convention(c) (
+    UnsafeMutableRawPointer?, UInt32, UnsafePointer<UInt32>?, Int32) -> Void = { ctx, _, types, n in
+    guard let bridge = spiceBridge(ctx), let types, n > 0 else { return }
+    let arr = (0..<Int(n)).map { types[$0] }
+    DispatchQueue.main.async { bridge.clipboard?.guestGrab(types: arr) }
+}
+
+let spiceClipboardRequest: @convention(c) (
+    UnsafeMutableRawPointer?, UInt32, UInt32) -> Void = { ctx, _, type in
+    DispatchQueue.main.async { spiceBridge(ctx)?.clipboard?.guestRequest(type: type) }
+}
+
+let spiceClipboardRelease: @convention(c) (
+    UnsafeMutableRawPointer?, UInt32) -> Void = { ctx, _ in
+    DispatchQueue.main.async { spiceBridge(ctx)?.clipboard?.guestRelease() }
+}
+
+let spiceClipboardData: @convention(c) (
+    UnsafeMutableRawPointer?, UInt32, UInt32, UnsafePointer<UInt8>?, Int) -> Void = { ctx, _, type, data, size in
+    guard let bridge = spiceBridge(ctx), let data, size > 0 else { return }
+    let bytes = Data(bytes: data, count: size)
+    DispatchQueue.main.async { bridge.clipboard?.guestData(type: type, data: bytes) }
 }
