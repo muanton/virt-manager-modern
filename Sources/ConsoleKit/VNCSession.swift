@@ -48,7 +48,7 @@ public final class VNCSession: ObservableObject {
     public init() {}
 
     public func start(_ target: ConsoleTarget) async {
-        guard status == .idle || isFailed else { return }
+        guard canStart else { return }
         status = .tunneling
 
         let host: String
@@ -100,7 +100,7 @@ public final class VNCSession: ObservableObject {
         tunnel = nil
         fbView = nil
         framebufferView = nil
-        status = .disconnected
+        status = .idle
     }
 
     deinit {
@@ -108,7 +108,12 @@ public final class VNCSession: ObservableObject {
         tunnel?.stop()
     }
 
-    private var isFailed: Bool { if case .failed = status { return true } else { return false } }
+    private var canStart: Bool {
+        switch status {
+        case .idle, .disconnected, .failed: return true
+        default: return false
+        }
+    }
 
     // MARK: - Coordinator callbacks (always on main)
 

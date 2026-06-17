@@ -49,6 +49,7 @@ final class ConnectionSession: ObservableObject, Identifiable {
     func connect() async {
         guard conn == nil else { return }
         status = .connecting
+        VMMLog.session.info("Connecting to \(self.config.name, privacy: .public)")
         do {
             let c = try await LibvirtConnection.open(uri: config.uri)
             conn = c
@@ -56,12 +57,15 @@ final class ConnectionSession: ObservableObject, Identifiable {
             try await startDomainEvents(on: c)
             await refreshDomainList()
             startPolling()
+            VMMLog.session.info("Connected to \(self.config.name, privacy: .public) (\(self.domains.count) VMs)")
         } catch {
             status = .failed(error.localizedDescription)
+            VMMLog.session.error("Connect failed for \(self.config.name, privacy: .public): \(error.localizedDescription, privacy: .public)")
         }
     }
 
     func disconnect() {
+        VMMLog.session.info("Disconnecting \(self.config.name, privacy: .public)")
         pollTask?.cancel()
         pollTask = nil
         deregisterEvents?()
@@ -85,6 +89,9 @@ final class ConnectionSession: ObservableObject, Identifiable {
     }
 
     private func handleDomainEvent(_ kind: DomainLifecycleEvent, summary: DomainSummary?) {
+        if let name = summary?.name {
+            VMMLog.session.debug("Domain event \(String(describing: kind), privacy: .public) on \(name, privacy: .public)")
+        }
         switch kind {
         case .undefined:
             if let uuid = summary?.uuid {
@@ -115,6 +122,7 @@ final class ConnectionSession: ObservableObject, Identifiable {
 
     private func beginReconnect() {
         guard status == .connected, let dead = conn else { return }
+        VMMLog.session.notice("Transport lost for \(self.config.name, privacy: .public) — reconnecting")
         deregisterEvents?()
         deregisterEvents = nil
         dead.close()
@@ -133,6 +141,7 @@ final class ConnectionSession: ObservableObject, Identifiable {
             hostResourcesLoaded = false
             try await startDomainEvents(on: c)
             await refreshDomainList()
+            VMMLog.session.info("Reconnected to \(self.config.name, privacy: .public)")
         } catch { /* poll loop retries */ }
     }
 
@@ -201,6 +210,10 @@ final class ConnectionSession: ObservableObject, Identifiable {
 
     func interfaceAddresses(uuid: String) async throws -> [IfaceAddr] {
         try await requireConnection().interfaceAddresses(uuid: uuid)
+    }
+
+    func guestAgentStatus(uuid: String) async throws -> GuestAgentStatus {
+        try await requireConnection().guestAgentStatus(uuid: uuid)
     }
 
     func domainXML(uuid: String) async throws -> String {
@@ -290,6 +303,9 @@ final class ConnectionSession: ObservableObject, Identifiable {
 
     func perform(_ action: DomainAction, on uuid: String) async throws {
         let conn = try requireConnection()
+        if let name = domain(uuid: uuid)?.name {
+            VMMLog.session.info("\(String(describing: action), privacy: .public) on \(name, privacy: .public)")
+        }
         switch action {
         case .shutdown, .reboot, .forceOff: await ejectAllCDROMs(uuid: uuid)
         default: break

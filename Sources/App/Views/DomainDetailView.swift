@@ -7,22 +7,14 @@ struct DomainDetailView: View {
     @ObservedObject var session: ConnectionSession
     let uuid: String
     var openConsoleOnce: Binding<Bool> = .constant(false)
-    /// Open the Delete / Clone sheets (presented by ContentView).
     var onDelete: (DomainSummary) -> Void = { _ in }
     var onClone: (DomainSummary) -> Void = { _ in }
 
     @EnvironmentObject private var appState: AppState
     @State private var confirmForceOff = false
     @State private var lifecycleError: String?
-    // This view is recreated per VM (.id in ContentView), so the selection is
-    // restored from a per-VM runtime map in AppState: each VM remembers which
-    // tab it was on for the lifetime of the app.
     @State private var tab = 0
 
-    // One console session per VM, owned here so it survives switching between
-    // detail tabs (Overview/Settings/XML/Console). Only torn down when this view
-    // goes away — i.e. when a different VM is selected — so normal use keeps a
-    // single persistent connection instead of reconnecting on every tab switch.
     @StateObject private var vnc = VNCSession()
     @StateObject private var spice = SpiceConsoleSession()
 
@@ -47,6 +39,7 @@ struct DomainDetailView: View {
                 .navigationSubtitle(domain.state.label)
                 .toolbar { lifecycleToolbar(domain) }
                 .toolbarBackground(.visible, for: .windowToolbar)
+                .background { lifecycleShortcuts(domain) }
                 .confirmationDialog("Force off \(domain.name)? Unsaved data may be lost.",
                                     isPresented: $confirmForceOff, titleVisibility: .visible) {
                     Button("Force Off", role: .destructive) { act(.forceOff) }
@@ -79,46 +72,72 @@ struct DomainDetailView: View {
         ToolbarItemGroup(placement: .primaryAction) {
             if domain.isActive {
                 if domain.state.isPaused {
-                    button("Resume", "play.fill", .resume,
-                           help: "Resume — continue running the paused VM")
+                    button("Resume", "play.fill", .resume, key: .return,
+                           help: "Resume — continue running the paused VM (⌘↩)")
                 } else {
-                    button("Pause", "pause.fill", .pause,
-                           help: "Pause — freeze the VM in memory (no shutdown)")
+                    button("Pause", "pause.fill", .pause, key: "p", modifiers: [.command, .shift],
+                           help: "Pause — freeze the VM in memory (⇧⌘P)")
                 }
-                button("Shut Down", "power", .shutdown,
-                       help: "Shut Down — ask the guest OS to power off gracefully (ACPI)")
-                button("Reboot", "arrow.clockwise", .reboot,
-                       help: "Reboot — ask the guest OS to restart gracefully")
+                button("Shut Down", "power", .shutdown, key: "d", modifiers: [.command, .shift],
+                       help: "Shut Down — graceful ACPI shutdown (⇧⌘D)")
+                button("Reboot", "arrow.clockwise", .reboot, key: "r", modifiers: [.command, .shift],
+                       help: "Reboot — graceful guest restart (⇧⌘R)")
                 Button(role: .destructive) {
                     confirmForceOff = true
                 } label: { Label("Force Off", systemImage: "bolt.fill") }
-                    .help("Force Off — pull the plug immediately (unsaved data is lost)")
-                Button {
-                    onClone(domain)
-                } label: { Label("Clone", systemImage: "plus.square.on.square") }
-                    .help("Clone — create an independent copy (the dialog offers to shut the VM down)")
-                Button(role: .destructive) {
-                    onDelete(domain)
-                } label: { Label("Delete", systemImage: "trash") }
-                    .help("Delete — force off, remove the VM, and optionally its disks")
+                    .keyboardShortcut(".", modifiers: [.command, .shift])
+                    .help("Force Off — pull the plug immediately (⇧⌘.)")
+                Button { onClone(domain) } label: {
+                    Label("Clone", systemImage: "plus.square.on.square")
+                }
+                .help("Clone — create an independent copy")
+                Button(role: .destructive) { onDelete(domain) } label: {
+                    Label("Delete", systemImage: "trash")
+                }
+                .help("Delete — remove the VM and optionally its disks")
             } else {
-                button("Start", "play.fill", .start,
-                       help: "Start — power on the VM")
-                Button {
-                    onClone(domain)
-                } label: { Label("Clone", systemImage: "plus.square.on.square") }
-                    .help("Clone — create an independent copy of this VM")
-                Button(role: .destructive) {
-                    onDelete(domain)
-                } label: { Label("Delete", systemImage: "trash") }
-                    .help("Delete — remove the VM and optionally its disks")
+                button("Start", "play.fill", .start, key: .return,
+                       help: "Start — power on the VM (⌘↩)")
+                Button { onClone(domain) } label: {
+                    Label("Clone", systemImage: "plus.square.on.square")
+                }
+                Button(role: .destructive) { onDelete(domain) } label: {
+                    Label("Delete", systemImage: "trash")
+                }
+            }
+        }
+    }
+
+    /// Hidden buttons so shortcuts work even when toolbar items aren't focused.
+    @ViewBuilder
+    private func lifecycleShortcuts(_ domain: DomainSummary) -> some View {
+        Group {
+            if domain.isActive {
+                if domain.state.isPaused {
+                    Button("") { act(.resume) }
+                        .keyboardShortcut(.return, modifiers: .command).hidden()
+                } else {
+                    Button("") { act(.pause) }
+                        .keyboardShortcut("p", modifiers: [.command, .shift]).hidden()
+                }
+                Button("") { act(.shutdown) }
+                    .keyboardShortcut("d", modifiers: [.command, .shift]).hidden()
+                Button("") { act(.reboot) }
+                    .keyboardShortcut("r", modifiers: [.command, .shift]).hidden()
+                Button("") { confirmForceOff = true }
+                    .keyboardShortcut(".", modifiers: [.command, .shift]).hidden()
+            } else {
+                Button("") { act(.start) }
+                    .keyboardShortcut(.return, modifiers: .command).hidden()
             }
         }
     }
 
     private func button(_ title: String, _ symbol: String, _ action: DomainAction,
+                        key: KeyEquivalent, modifiers: EventModifiers = .command,
                         help: String) -> some View {
         Button { act(action) } label: { Label(title, systemImage: symbol) }
+            .keyboardShortcut(key, modifiers: modifiers)
             .help(help)
     }
 

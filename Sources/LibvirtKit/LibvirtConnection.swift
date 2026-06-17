@@ -31,6 +31,7 @@ public final class LibvirtConnection: @unchecked Sendable {
                         fallback: "Failed to connect to \(uri)"))
                     return
                 }
+                VMMLog.libvirt.info("Opened \(uri, privacy: .public)")
                 cont.resume(returning: LibvirtConnection(conn: conn, uri: uri))
             }
         }

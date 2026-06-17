@@ -20,6 +20,7 @@ struct ConsoleTab: View {
     @State private var showQXLBanner = true
     @State private var switching = false
     @State private var switchResult: String?
+    @State private var connectedForDomainID: Int32 = -2
 
     var body: some View {
         // Everything — banner included — lives inside the GeometryReader, which
@@ -164,7 +165,10 @@ struct ConsoleTab: View {
         hasSerialDevice && (graphics == nil || consoleMode == "serial")
     }
 
-    private var taskKey: String { "\(domain.uuid)-\(domain.state.rawValue)" }
+    /// Includes domainID so a guest reboot (new runtime id) forces a fresh console.
+    private var taskKey: String {
+        "\(domain.uuid)-\(domain.state.rawValue)-\(domain.domainID)"
+    }
 
     private func overlay(_ text: String) -> some View {
         VStack(spacing: 12) {
@@ -189,7 +193,11 @@ struct ConsoleTab: View {
     // MARK: - Setup
 
     private func prepare(force: Bool = false) async {
-        guard domain.state.isActive else { vnc.stop(); spice.stop(); return }
+        guard domain.state.isActive else {
+            vnc.stop(); spice.stop()
+            connectedForDomainID = -2
+            return
+        }
 
         // Always refresh graphics + video model (cheap) so the QXL banner is
         // shown reliably even when returning to an already-connected console.
@@ -209,10 +217,14 @@ struct ConsoleTab: View {
         loaded = true
         if showSerial { return }   // serial path needs no tunnel/VNC/SPICE
 
-        // Already connecting or connected (e.g. returning to this tab) — leave it.
-        if !force, consoleActive { return }
+        let needsReconnect = force || connectedForDomainID != domain.domainID
+        if !needsReconnect, consoleActive { return }
+
+        vnc.stop(); spice.stop()
+        connectedForDomainID = domain.domainID
 
         guard let g, let port = g.port, port > 0 else { return }
+        VMMLog.console.info("Opening \(g.kind.rawValue, privacy: .public) console for \(self.domain.name, privacy: .public)")
         let listen = g.listen ?? "127.0.0.1"
         let remoteHost = (listen == "0.0.0.0" || listen == "::") ? "127.0.0.1" : listen
         let target = ConsoleTarget(

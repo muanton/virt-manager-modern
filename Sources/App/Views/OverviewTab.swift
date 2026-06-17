@@ -6,6 +6,7 @@ struct OverviewTab: View {
     let domain: DomainSummary
 
     @State private var ifaces: [IfaceAddr] = []
+    @State private var agentStatus: GuestAgentStatus = .inactive
     @State private var ifacesLoaded = false
 
     var body: some View {
@@ -19,6 +20,19 @@ struct OverviewTab: View {
                     }
                 }
                 LabeledContent("Domain ID", value: domain.domainID >= 0 ? "\(domain.domainID)" : "—")
+                if domain.isActive {
+                    LabeledContent("QEMU guest agent") {
+                        HStack(spacing: 6) {
+                            if !ifacesLoaded {
+                                ProgressView().controlSize(.small)
+                            } else {
+                                Image(systemName: agentStatus.symbol)
+                                    .foregroundStyle(agentColor)
+                                Text(agentStatus.label)
+                            }
+                        }
+                    }
+                }
             }
             if domain.isActive, let s = session.stats[domain.uuid] {
                 Section("Usage") {
@@ -44,7 +58,9 @@ struct OverviewTab: View {
                     if !ifacesLoaded {
                         ProgressView().controlSize(.small)
                     } else if ifaces.isEmpty {
-                        Text("No addresses reported (guest agent not running, no DHCP lease).")
+                        Text(agentStatus == .connected
+                             ? "Guest agent is running but reported no addresses."
+                             : "No addresses reported (guest agent not running, no DHCP lease).")
                             .foregroundStyle(.secondary)
                     } else {
                         ForEach(ifaces) { iface in
@@ -84,14 +100,27 @@ struct OverviewTab: View {
         }
         .formStyle(.grouped)
         .task(id: "\(domain.uuid)-\(domain.state.rawValue)") {
-            // Fetch IPs on appear and re-poll every 10 s while this tab is visible.
             ifacesLoaded = false
             while !Task.isCancelled {
-                guard domain.isActive else { ifaces = []; ifacesLoaded = true; return }
+                guard domain.isActive else {
+                    ifaces = []
+                    agentStatus = .inactive
+                    ifacesLoaded = true
+                    return
+                }
+                agentStatus = (try? await session.guestAgentStatus(uuid: domain.uuid)) ?? .unavailable
                 ifaces = (try? await session.interfaceAddresses(uuid: domain.uuid)) ?? []
                 ifacesLoaded = true
                 try? await Task.sleep(for: .seconds(10))
             }
+        }
+    }
+
+    private var agentColor: Color {
+        switch agentStatus {
+        case .connected: return .green
+        case .unavailable: return .orange
+        case .inactive: return .secondary
         }
     }
 }

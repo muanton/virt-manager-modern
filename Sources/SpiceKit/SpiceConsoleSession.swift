@@ -70,7 +70,7 @@ public final class SpiceConsoleSession: ObservableObject {
         bridge.cleanup()
         tunnel?.stop(); tunnel = nil
         displayView = nil
-        if status != .idle { status = .disconnected }
+        status = .idle
     }
 
     deinit {

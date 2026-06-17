@@ -9,6 +9,29 @@ public struct DomainStats: Sendable {
     public let vcpuCount: Int
 }
 
+/// Whether the QEMU guest agent is reachable for a running VM.
+public enum GuestAgentStatus: Sendable, Equatable {
+    case inactive
+    case connected
+    case unavailable
+
+    public var label: String {
+        switch self {
+        case .inactive: return "VM not running"
+        case .connected: return "Connected"
+        case .unavailable: return "Not running"
+        }
+    }
+
+    public var symbol: String {
+        switch self {
+        case .inactive: return "circle"
+        case .connected: return "checkmark.circle.fill"
+        case .unavailable: return "exclamationmark.circle"
+        }
+    }
+}
+
 /// A guest NIC with its addresses ("192.168.1.10/24").
 public struct IfaceAddr: Sendable, Identifiable, Equatable {
     public let name: String
@@ -53,6 +76,31 @@ extension LibvirtConnection {
                                         balloonRSSKiB: rss, vcpuCount: vcpus)
             }
             return out
+        }
+    }
+
+    /// Probes the QEMU guest agent (agent-only — no DHCP lease fallback).
+    public func guestAgentStatus(uuid: String) async throws -> GuestAgentStatus {
+        try await run { conn in
+            try Self.withDomain(conn, uuid: uuid) { dom in
+                var state: Int32 = 0
+                _ = virDomainGetState(dom, &state, nil, 0)
+                guard state == VIR_DOMAIN_RUNNING.rawValue || state == VIR_DOMAIN_PAUSED.rawValue else {
+                    return .inactive
+                }
+                var ifaces: UnsafeMutablePointer<virDomainInterfacePtr?>?
+                let n = virDomainInterfaceAddresses(
+                    dom, &ifaces, UInt32(VIR_DOMAIN_INTERFACE_ADDRESSES_SRC_AGENT.rawValue), 0)
+                if n >= 0 {
+                    if let ifaces {
+                        for i in 0..<Int(n) { virDomainInterfaceFree(ifaces[i]) }
+                        free(ifaces)
+                    }
+                    return .connected
+                }
+                virResetLastError()
+                return .unavailable
+            }
         }
     }
 
