@@ -18,7 +18,7 @@ struct OverviewTab: View {
                         Text(domain.state.label)
                     }
                 }
-                LabeledContent("Domain ID", value: domain.id >= 0 ? "\(domain.id)" : "—")
+                LabeledContent("Domain ID", value: domain.domainID >= 0 ? "\(domain.domainID)" : "—")
             }
             if domain.isActive, let s = session.stats[domain.uuid] {
                 Section("Usage") {

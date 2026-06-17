@@ -46,11 +46,15 @@ public enum DomainState: Int32, Sendable, CaseIterable {
 public struct DomainSummary: Identifiable, Sendable, Hashable {
     public let uuid: String
     public let name: String
-    public let id: Int32          // libvirt domain id, -1 when inactive
+    public let domainID: Int32    // libvirt runtime domain id, -1 when inactive
     public let state: DomainState
     public let vcpus: Int
     public let memoryKiB: UInt64      // current allocation
     public let maxMemoryKiB: UInt64
+
+    /// SwiftUI identity. Must be the UUID: libvirt's numeric domain id is -1
+    /// for every inactive domain, so it collides as soon as two VMs are off.
+    public var id: String { uuid }
 
     public var isActive: Bool { state.isActive }
 }

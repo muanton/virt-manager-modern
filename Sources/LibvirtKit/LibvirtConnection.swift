@@ -355,7 +355,7 @@ public final class LibvirtConnection: @unchecked Sendable {
         }
 
         return DomainSummary(
-            uuid: uuid, name: name, id: id,
+            uuid: uuid, name: name, domainID: id,
             state: DomainState(raw: stateRaw),
             vcpus: vcpus, memoryKiB: mem, maxMemoryKiB: maxMem)
     }

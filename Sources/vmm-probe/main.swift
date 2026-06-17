@@ -17,7 +17,7 @@ do {
     let domains = try await conn.listDomains()
     print("\(domains.count) domain(s):")
     for d in domains {
-        print("  - \(d.name)  [\(d.state.label)]  vcpus=\(d.vcpus)  mem=\(d.memoryKiB)KiB  id=\(d.id)")
+        print("  - \(d.name)  [\(d.state.label)]  vcpus=\(d.vcpus)  mem=\(d.memoryKiB)KiB  domainID=\(d.domainID)")
     }
 
     // Exercise a lifecycle round-trip on the fake driver.
