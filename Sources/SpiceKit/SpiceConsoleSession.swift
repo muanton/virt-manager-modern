@@ -23,7 +23,7 @@ public final class SpiceConsoleSession: ObservableObject {
 
     public init() {}
 
-    public func start(_ target: ConsoleTarget) async {
+    public func start(_ target: ConsoleTarget, clipboardEnabled: Bool = true) async {
         guard canStart else { return }
         status = .tunneling
 
@@ -68,7 +68,7 @@ public final class SpiceConsoleSession: ObservableObject {
 
         handle = vmm_spice_session_create(host, Int32(port), target.password, cb)
         vmm_spice_session_start(handle)
-        clipboard.start(session: self, handle: handle)
+        clipboard.start(session: self, handle: handle, enabled: clipboardEnabled)
     }
 
     public func stop() {

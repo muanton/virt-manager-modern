@@ -11,12 +11,13 @@ final class SpiceClipboard {
     private var pollTimer: Timer?
     private var guestOwns = false
 
-    func start(session: SpiceConsoleSession, handle: OpaquePointer?) {
+    func start(session: SpiceConsoleSession, handle: OpaquePointer?, enabled: Bool = true) {
         stop()
         self.session = session
         self.handle = handle
         lastChangeCount = NSPasteboard.general.changeCount
-        vmm_spice_clipboard_enable(handle, 1)
+        vmm_spice_clipboard_enable(handle, enabled ? 1 : 0)
+        guard enabled else { return }
         pollTimer = Timer.scheduledTimer(withTimeInterval: 0.4, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.pollPasteboard() }
         }

@@ -42,7 +42,8 @@ storage handled natively.
   stats in the VM list, VM search/filter, keyboard shortcuts for lifecycle
   actions, guard rails in hardware editing (controllers in use can't be
   removed, duplicate singletons can't be added), automatic installer ISO eject
-  on power actions, host dashboard, storage/network managers.
+  on power actions, host dashboard with live memory stats, storage/network
+  managers, managed save, and VM screenshots.
 
 **Where original virt-manager still wins:**
 
@@ -50,8 +51,7 @@ storage handled natively.
 - Breadth: migration between hosts,
   multiple hypervisor drivers (Xen, LXC, …), unattended installs backed by the
   full libosinfo database (this app ships a curated OS catalog instead).
-- Console extras: audio and USB redirection in SPICE (clipboard sharing is
-  supported here for UTF-8 text).
+- Console extras: audio and USB redirection in SPICE.
 - Cross-platform and packaged by every Linux distribution; this app is
   macOS-14+/Apple-Silicon only.
 
@@ -70,7 +70,8 @@ a 20-year-old C virtualization API, with its own reproducible toolchain.
 - **Connections** to remote libvirt over `qemu+ssh://` (SSH keys / ssh-agent),
   managed in a virt-manager-style add/edit dialog with autoconnect.
 - **VM list** in a native sidebar with live status, plus full lifecycle:
-  start, graceful shutdown, reboot, force off, pause/resume, managed save.
+  start, graceful shutdown, reboot, force off, pause/resume, **managed save**
+  (hibernate to disk with Restore on next start).
 - **New VM wizard** with a guest-OS catalog (the role libosinfo plays in legacy
   virt-manager): picking e.g. *Ubuntu 24.04* or *Windows 11* pre-fills
   recommended CPU/RAM/disk and tunes devices — virtio vs SATA/e1000e, Hyper-V
@@ -86,8 +87,10 @@ a 20-year-old C virtualization API, with its own reproducible toolchain.
 - **Delete VM** flow with per-file storage cleanup checkboxes, force-off for
   running VMs, and full metadata cleanup (UEFI NVRAM, managed save, snapshots).
 - **SPICE and VNC consoles**, both tunnelled automatically over SSH and
-  rendered natively (no GTK). The Console tab picks the right protocol from the
-  VM's `<graphics>` device — and falls back to a real **serial console**
+  rendered natively (no GTK). Detach to a separate window with fullscreen.
+  **Clipboard sharing** for SPICE (UTF-8) and VNC (RoyalVNCKit redirection),
+  toggled in **Settings** (⌘,). The Console tab picks the right protocol from
+  the VM's `<graphics>` device — and falls back to a real **serial console**
   (terminal emulator over `virDomainOpenConsole`) for headless VMs. CD-ROM
   media can be ejected live; power actions auto-eject installers so they
   don't boot again.
@@ -95,18 +98,21 @@ a 20-year-old C virtualization API, with its own reproducible toolchain.
   and Overview (event-driven VM list, stats polled every 5s); guest IP
   addresses (guest agent or DHCP leases) with one-click copy; QEMU guest agent
   status badge on Overview.
-- **Host dashboard**: per-connection host info (CPU model, memory, VM counts,
-  libvirt version) from the connection menu.
-- **Storage pool manager**: start/stop/rescan pools, browse volumes, delete
-  volumes; volume lists refresh on libvirt storage-pool events.
-- **Virtual network manager**: list/start/stop/delete networks, one-click
-  default NAT network setup.
+- **VM screenshots** on the Overview tab (`virDomainScreenshot`), auto-refresh
+  every 30s while running, with Save to disk.
+- **Host dashboard**: per-connection host info (CPU model, installed memory,
+  **live memory use**, VM counts, libvirt version) from the connection menu.
+- **Storage pool manager**: start/stop/rescan pools; **create**, **resize**,
+  **wipe**, and delete volumes; lists refresh on libvirt storage-pool events.
+- **Virtual network manager**: list/start/stop/delete networks; **XML editor**
+  for custom definitions; one-click default NAT network setup.
 - **Snapshots**: create (incl. memory while running), revert, delete — shown
   as a tree with the current marker.
 - **Clone VM** with per-disk Clone/Share/Skip, and **ISO upload** from the Mac
   straight into a host storage pool (libvirt streams — no scp).
 - **Live hotplug**: attach disks/NICs/USB devices to running VMs, detach them
   live, and resize vCPUs/memory without a restart.
+- **Preferences** (⌘,): default detail tab, SPICE/VNC clipboard toggles.
 
 ## Requirements
 
@@ -146,10 +152,12 @@ for the details (and for bumping dependency versions).
 
 ## Status & limitations
 
-- VNC and SPICE consoles (scaled-to-fit, full keyboard/mouse, detach to a
-  separate window with fullscreen). SPICE clipboard sync for UTF-8 text.
-  No audio, USB redirection, multi-monitor, or RDP yet.
+- VNC and SPICE consoles (scaled-to-fit, full keyboard/mouse, detach window).
+  Clipboard for both protocols (Settings to disable). No audio, USB redirection,
+  multi-monitor, or RDP yet.
 - VMs using virtio-gpu **GL scanout** (`<gl enable='yes'>`) aren't rendered.
+- Screenshots require a running VM with a graphics device; format is
+  hypervisor-specific (usually PNG on QEMU/KVM).
 - The app bundle is **ad-hoc signed**: on another Mac, right-click → Open the
   first time. Proper distribution would need Developer ID + notarization.
 - arm64 only (the dependency build targets Apple Silicon).

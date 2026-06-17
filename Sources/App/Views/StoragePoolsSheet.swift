@@ -11,6 +11,8 @@ struct StoragePoolsSheet: View {
     @State private var expandedPools: Set<String> = []
     @State private var confirmDelete: StorageVolume?
     @State private var createInPool: PoolRef?
+    @State private var resizeVolume: StorageVolume?
+    @State private var confirmWipe: StorageVolume?
 
     private struct PoolRef: Identifiable {
         let name: String
@@ -77,6 +79,11 @@ struct StoragePoolsSheet: View {
                 Task { await reload() }
             }
         }
+        .sheet(item: $resizeVolume) { vol in
+            ResizeVolumeSheet(session: session, volume: vol) {
+                Task { await reload() }
+            }
+        }
         .confirmationDialog(
             "Delete volume “\(confirmDelete?.name ?? "")”?",
             isPresented: Binding(get: { confirmDelete != nil },
@@ -85,6 +92,15 @@ struct StoragePoolsSheet: View {
             Button("Delete", role: .destructive) { deleteVolume(vol) }
         } message: { _ in
             Text("The volume file is removed from the host. VMs referencing it may break.")
+        }
+        .confirmationDialog(
+            "Wipe volume “\(confirmWipe?.name ?? "")”?",
+            isPresented: Binding(get: { confirmWipe != nil },
+                                 set: { if !$0 { confirmWipe = nil } }),
+            titleVisibility: .visible, presenting: confirmWipe) { vol in
+            Button("Wipe", role: .destructive) { wipeVolume(vol) }
+        } message: { _ in
+            Text("Overwrites the volume with zeros. This cannot be undone.")
         }
     }
 
@@ -151,11 +167,25 @@ struct StoragePoolsSheet: View {
             Spacer()
             Text(Format.bytes(vol.capacityBytes))
                 .font(.caption).foregroundStyle(.secondary).monospacedDigit()
+            Button { resizeVolume = vol } label: {
+                Image(systemName: "arrow.up.left.and.arrow.down.right")
+            }
+            .buttonStyle(.plain)
+            .help("Resize volume")
+            .disabled(working)
+            Button { confirmWipe = vol } label: {
+                Image(systemName: "eraser")
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(.orange)
+            .help("Wipe volume (secure erase)")
+            .disabled(working)
             Button(role: .destructive) { confirmDelete = vol } label: {
                 Image(systemName: "trash")
             }
             .buttonStyle(.plain)
             .foregroundStyle(.red)
+            .help("Delete volume")
         }
     }
 
@@ -193,6 +223,19 @@ struct StoragePoolsSheet: View {
             defer { working = false }
             do {
                 try await session.refreshPool(name: name)
+                error = nil
+            } catch let err {
+                error = err.localizedDescription
+            }
+        }
+    }
+
+    private func wipeVolume(_ vol: StorageVolume) {
+        working = true
+        Task {
+            defer { working = false }
+            do {
+                try await session.wipeVolume(path: vol.path)
                 error = nil
             } catch let err {
                 error = err.localizedDescription

@@ -476,6 +476,19 @@ final class ConnectionSession: ObservableObject, Identifiable {
         volumes.removeAll { $0.path == path }
     }
 
+    func resizeVolume(path: String, capacityBytes: UInt64) async throws {
+        try await requireConnection().resizeVolume(path: path, capacityBytes: capacityBytes)
+        try await loadStoragePools()
+    }
+
+    func wipeVolume(path: String) async throws {
+        try await requireConnection().wipeVolume(path: path)
+    }
+
+    func screenshot(uuid: String) async throws -> DomainScreenshot {
+        try await requireConnection().screenshot(uuid: uuid)
+    }
+
     func loadNetworks() async throws {
         networks = try await requireConnection().listNetworks()
         hostResourcesLoaded = true

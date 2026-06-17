@@ -47,7 +47,7 @@ public final class VNCSession: ObservableObject {
 
     public init() {}
 
-    public func start(_ target: ConsoleTarget) async {
+    public func start(_ target: ConsoleTarget, clipboardEnabled: Bool = true) async {
         guard canStart else { return }
         status = .tunneling
 
@@ -80,7 +80,7 @@ public final class VNCSession: ObservableObject {
             isScalingEnabled: true,
             useDisplayLink: false,
             inputMode: .forwardKeyboardShortcutsIfNotInUseLocally,
-            isClipboardRedirectionEnabled: true,
+            isClipboardRedirectionEnabled: clipboardEnabled,
             colorDepth: .depth24Bit,
             frameEncodings: VNCFrameEncodingType.defaultFrameEncodings)
 

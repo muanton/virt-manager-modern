@@ -11,6 +11,7 @@ struct DomainDetailView: View {
     var onClone: (DomainSummary) -> Void = { _ in }
 
     @EnvironmentObject private var appState: AppState
+    @EnvironmentObject private var preferences: AppPreferences
     @State private var confirmForceOff = false
     @State private var confirmSave = false
     @State private var confirmDiscardSave = false
@@ -75,7 +76,7 @@ struct DomainDetailView: View {
                 tab = 1
                 openConsoleOnce.wrappedValue = false
             } else {
-                tab = appState.detailTabs[tabKey] ?? 0
+                tab = appState.detailTabs[tabKey] ?? preferences.defaultDetailTab
             }
         }
         .onChange(of: tab) { _, newValue in appState.detailTabs[tabKey] = newValue }

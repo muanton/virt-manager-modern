@@ -93,6 +93,14 @@ final class IntegrationTests: XCTestCase {
         _ = try await conn.listNetworks()
     }
 
+    func testScreenshotOnRunningDomain() async throws {
+        let conn = try await LibvirtConnection.open(uri: uri)
+        defer { conn.close() }
+        let domains = try await conn.listDomains()
+        guard let active = domains.first(where: \.isActive) else { return }
+        _ = try? await conn.screenshot(uuid: active.uuid)
+    }
+
     func testStoragePoolRefresh() async throws {
         let conn = try await LibvirtConnection.open(uri: uri)
         defer { conn.close() }

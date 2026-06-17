@@ -6,6 +6,7 @@ import ConsoleKit
 import SpiceKit
 
 struct ConsoleTab: View {
+    @EnvironmentObject private var preferences: AppPreferences
     @ObservedObject var session: ConnectionSession
     let domain: DomainSummary
     // Owned by DomainDetailView so the connection persists across tab switches.
@@ -274,8 +275,10 @@ struct ConsoleTab: View {
             password: g.password)
 
         switch g.kind {
-        case .vnc:   await vnc.start(target)
-        case .spice: await spice.start(target)
+        case .vnc:
+            await vnc.start(target, clipboardEnabled: preferences.vncClipboardEnabled)
+        case .spice:
+            await spice.start(target, clipboardEnabled: preferences.spiceClipboardEnabled)
         default:     break
         }
     }

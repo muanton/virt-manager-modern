@@ -222,6 +222,31 @@ extension LibvirtConnection {
         }
     }
 
+    public func resizeVolume(path: String, capacityBytes: UInt64) async throws {
+        try await run { conn in
+            guard let vol = virStorageVolLookupByPath(conn, path) else {
+                throw LibvirtError.lastError(fallback: "\(path) is not managed by a storage pool")
+            }
+            defer { virStorageVolFree(vol) }
+            let flags = VIR_STORAGE_VOL_RESIZE_ALLOCATE.rawValue
+            guard virStorageVolResize(vol, capacityBytes, flags) == 0 else {
+                throw LibvirtError.lastError(fallback: "Failed to resize volume")
+            }
+        }
+    }
+
+    public func wipeVolume(path: String) async throws {
+        try await run { conn in
+            guard let vol = virStorageVolLookupByPath(conn, path) else {
+                throw LibvirtError.lastError(fallback: "\(path) is not managed by a storage pool")
+            }
+            defer { virStorageVolFree(vol) }
+            guard virStorageVolWipe(vol, 0) == 0 else {
+                throw LibvirtError.lastError(fallback: "Failed to wipe volume")
+            }
+        }
+    }
+
     public func createVolume(pool poolName: String, name: String,
                              capacityBytes: UInt64, format: String) async throws -> StorageVolume {
         try await run { conn in

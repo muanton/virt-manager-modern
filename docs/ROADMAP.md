@@ -35,8 +35,10 @@ How the app's feature set maps onto what libvirt offers for **remote** managemen
 | Host memory live stats | `virNodeGetMemoryStats` | ✅ |
 | Keyboard shortcuts (lifecycle) | — | ✅ |
 | CI (swift test + app build) | — | ✅ |
-| Volume resize / wipe | `virStorageVolResize`, `virStorageVolWipe` | ⬜ later |
-| VM screenshot | `virDomainScreenshot` | ⬜ — live console covers it |
+| Volume resize / wipe | `virStorageVolResize`, `virStorageVolWipe` | ✅ |
+| VM screenshot | `virDomainScreenshot` | ✅ (Overview tab) |
+| App preferences (clipboard, default tab) | — | ✅ |
+| VNC clipboard redirection | RoyalVNCKit | ✅ |
 | SPICE audio / USB redirection | spice-gtk channels | ⬜ later |
 | Multi-monitor / virtio-gpu GL scanout | spice-gtk | ⬜ later |
 | Migration between hosts | `virDomainMigrate*` | ⬜ — single-host focus |

@@ -1,4 +1,6 @@
 import SwiftUI
+import AppKit
+import UniformTypeIdentifiers
 import LibvirtKit
 
 struct OverviewTab: View {
@@ -9,6 +11,9 @@ struct OverviewTab: View {
     @State private var agentStatus: GuestAgentStatus = .inactive
     @State private var ifacesLoaded = false
     @State private var hasManagedSave = false
+    @State private var screenshotData: Data?
+    @State private var screenshotError: String?
+    @State private var screenshotLoading = false
 
     var body: some View {
         Form {
@@ -61,6 +66,24 @@ struct OverviewTab: View {
                 }
             }
             if domain.isActive {
+                Section("Display") {
+                    if screenshotLoading, screenshotData == nil {
+                        ProgressView().controlSize(.small)
+                    } else if let screenshotData {
+                        ScreenshotPreview(data: screenshotData)
+                        HStack {
+                            Button("Refresh") { Task { await captureScreenshot() } }
+                                .disabled(screenshotLoading)
+                            Button("Save…") { saveScreenshot(screenshotData) }
+                            Spacer()
+                        }
+                    } else if let screenshotError {
+                        Text(screenshotError).foregroundStyle(.secondary).font(.caption)
+                        Button("Retry") { Task { await captureScreenshot() } }
+                    } else {
+                        Button("Capture Screenshot") { Task { await captureScreenshot() } }
+                    }
+                }
                 Section("Network") {
                     if !ifacesLoaded {
                         ProgressView().controlSize(.small)
@@ -109,10 +132,14 @@ struct OverviewTab: View {
         .task(id: "\(domain.uuid)-\(domain.state.rawValue)") {
             hasManagedSave = (try? await session.hasManagedSave(uuid: domain.uuid)) ?? false
             ifacesLoaded = false
+            screenshotData = nil
+            screenshotError = nil
+            if domain.isActive { await captureScreenshot() }
             while !Task.isCancelled {
                 guard domain.isActive else {
                     ifaces = []
                     agentStatus = .inactive
+                    screenshotData = nil
                     ifacesLoaded = true
                     return
                 }
@@ -121,6 +148,36 @@ struct OverviewTab: View {
                 ifacesLoaded = true
                 try? await Task.sleep(for: .seconds(10))
             }
+        }
+        .task(id: "screenshot-\(domain.uuid)") {
+            guard domain.isActive else { return }
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(30))
+                await captureScreenshot()
+            }
+        }
+    }
+
+    private func captureScreenshot() async {
+        guard domain.isActive else { return }
+        screenshotLoading = true
+        defer { screenshotLoading = false }
+        do {
+            let shot = try await session.screenshot(uuid: domain.uuid)
+            screenshotData = shot.data
+            screenshotError = nil
+        } catch {
+            screenshotError = error.localizedDescription
+        }
+    }
+
+    private func saveScreenshot(_ data: Data) {
+        let panel = NSSavePanel()
+        panel.allowedContentTypes = [.png]
+        panel.nameFieldStringValue = "\(domain.name)-screenshot.png"
+        panel.begin { response in
+            guard response == .OK, let url = panel.url else { return }
+            try? data.write(to: url)
         }
     }
 
