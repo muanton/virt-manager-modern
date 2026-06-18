@@ -935,13 +935,19 @@ public struct DomainConfig {
 
     /// Normalized device descriptions for comparing running and persistent XML.
     public func deviceDiffSignatures() -> Set<String> {
-        guard let devs = root.elements(forName: "devices").first else { return [] }
-        var out: Set<String> = []
+        Set(deviceXMLBySignature().keys)
+    }
+
+    /// Maps each diff signature to the device's XML fragment (for live attach/detach).
+    public func deviceXMLBySignature() -> [String: String] {
+        guard let devs = root.elements(forName: "devices").first else { return [:] }
+        var out: [String: String] = [:]
         for node in devs.children ?? [] {
             guard let el = node as? XMLElement, let name = el.name, name != "emulator" else { continue }
             if name == "memballoon" { continue }
             if name == "controller", Self.isHiddenController(el) { continue }
-            if let sig = Self.deviceDiffSignature(el) { out.insert(sig) }
+            guard let sig = Self.deviceDiffSignature(el) else { continue }
+            out[sig] = el.xmlString(options: [])
         }
         return out
     }

@@ -195,23 +195,39 @@ public final class LibvirtConnection: @unchecked Sendable {
 
     /// Changes the vCPU count on the running guest (and the config).
     public func setVcpusLive(uuid: String, count: Int) async throws {
+        try await setVcpus(uuid: uuid, count: count,
+                           affect: VIR_DOMAIN_AFFECT_LIVE.rawValue | VIR_DOMAIN_AFFECT_CONFIG.rawValue)
+    }
+
+    /// Changes the guest's memory balloon on the running guest (and config).
+    /// Bounded by the domain's maximum memory.
+    public func setMemoryLive(uuid: String, kib: UInt64) async throws {
+        try await setMemory(uuid: uuid, kib: kib,
+                            affect: VIR_DOMAIN_AFFECT_LIVE.rawValue | VIR_DOMAIN_AFFECT_CONFIG.rawValue)
+    }
+
+    public func setLiveVcpus(uuid: String, count: Int) async throws {
+        try await setVcpus(uuid: uuid, count: count, affect: VIR_DOMAIN_AFFECT_LIVE.rawValue)
+    }
+
+    public func setLiveMemory(uuid: String, kib: UInt64) async throws {
+        try await setMemory(uuid: uuid, kib: kib, affect: VIR_DOMAIN_AFFECT_LIVE.rawValue)
+    }
+
+    public func setVcpus(uuid: String, count: Int, affect: UInt32) async throws {
         try await run { conn in
             try Self.withDomain(conn, uuid: uuid) { dom in
-                let flags = VIR_DOMAIN_AFFECT_LIVE.rawValue | VIR_DOMAIN_AFFECT_CONFIG.rawValue
-                guard virDomainSetVcpusFlags(dom, UInt32(count), flags) == 0 else {
+                guard virDomainSetVcpusFlags(dom, UInt32(count), affect) == 0 else {
                     throw LibvirtError.lastError(fallback: "Failed to set vCPUs")
                 }
             }
         }
     }
 
-    /// Changes the guest's memory balloon on the running guest (and config).
-    /// Bounded by the domain's maximum memory.
-    public func setMemoryLive(uuid: String, kib: UInt64) async throws {
+    public func setMemory(uuid: String, kib: UInt64, affect: UInt32) async throws {
         try await run { conn in
             try Self.withDomain(conn, uuid: uuid) { dom in
-                let flags = VIR_DOMAIN_AFFECT_LIVE.rawValue | VIR_DOMAIN_AFFECT_CONFIG.rawValue
-                guard virDomainSetMemoryFlags(dom, UInt(kib), flags) == 0 else {
+                guard virDomainSetMemoryFlags(dom, UInt(kib), affect) == 0 else {
                     throw LibvirtError.lastError(fallback: "Failed to set memory")
                 }
             }

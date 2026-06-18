@@ -48,10 +48,9 @@ storage handled natively.
 **Where original virt-manager still wins:**
 
 - Maturity: ~20 years of edge cases; this app is young.
-- Breadth: migration between hosts,
-  multiple hypervisor drivers (Xen, LXC, …), unattended installs backed by the
-  full libosinfo database (this app ships a curated OS catalog instead).
-- Console extras: audio and USB redirection in SPICE.
+- Breadth: migration between hosts, multiple hypervisor drivers (Xen, LXC, …),
+  unattended installs backed by the full libosinfo database (this app ships a
+  curated OS catalog and is QEMU/KVM + single-host focused).
 - Cross-platform and packaged by every Linux distribution; this app is
   macOS-14+/Apple-Silicon only.
 
@@ -83,18 +82,23 @@ a 20-year-old C virtualization API, with its own reproducible toolchain.
   **Add Hardware** knows what's addable (singleton devices, SPICE-dependent
   devices); **Remove** knows what's removable (controllers in use are blocked,
   removing the boot disk warns). Edits stage into a working copy and apply via
-  `defineXML`.
+  `defineXML`. **Config drift** detection when the running VM differs from
+  the saved definition — diff sheet, **revert running to saved** for hot-plug
+  changes, and warnings before shutdown/reboot/save/force-off.
 - **Delete VM** flow with per-file storage cleanup checkboxes, force-off for
   running VMs, and full metadata cleanup (UEFI NVRAM, managed save, snapshots).
 - **SPICE and VNC consoles**, both tunnelled automatically over SSH and
   rendered natively (no GTK). Detach to a separate window with fullscreen.
   **Clipboard sharing** for SPICE (UTF-8) and VNC (RoyalVNCKit redirection),
-  toggled in **Settings** (⌘,). The Console tab picks the right protocol from
-  the VM's `<graphics>` device — and falls back to a real **serial console**
-  (terminal emulator over `virDomainOpenConsole`) for headless VMs. CD-ROM
-  media can be ejected live; power actions auto-eject installers so they
+  **SPICE audio**, **USB redirection** with a device picker in the console
+  toolbar, and a **multi-monitor picker** when the guest exposes more than one
+  display — all toggled in **Settings** (⌘,). The Console tab picks the right
+  protocol from the VM's `<graphics>` device — and falls back to a real **serial
+  console** (terminal emulator over `virDomainOpenConsole`) for headless VMs.
+  CD-ROM media can be ejected live; power actions auto-eject installers so they
   don't boot again.
-- **Live stats & guest IPs**: CPU% and memory per running VM in the sidebar
+- **Live stats & guest IPs**: CPU%, memory, aggregate block/disk and network
+  I/O, and **per-device disk & NIC throughput** per running VM in the sidebar
   and Overview (event-driven VM list, stats polled every 5s); guest IP
   addresses (guest agent or DHCP leases) with one-click copy; QEMU guest agent
   status badge on Overview.
@@ -112,7 +116,8 @@ a 20-year-old C virtualization API, with its own reproducible toolchain.
   straight into a host storage pool (libvirt streams — no scp).
 - **Live hotplug**: attach disks/NICs/USB devices to running VMs, detach them
   live, and resize vCPUs/memory without a restart.
-- **Preferences** (⌘,): default detail tab, SPICE/VNC clipboard toggles.
+- **Preferences** (⌘,): default detail tab, SPICE/VNC clipboard, SPICE audio,
+  and USB redirection toggles.
 
 ## Requirements
 
@@ -173,9 +178,10 @@ into the bundle on `make app`; bump with `make bump-patch` / `bump-minor` /
 ## Status & limitations
 
 - VNC and SPICE consoles (scaled-to-fit, full keyboard/mouse, detach window).
-  Clipboard for both protocols (Settings to disable). No audio, USB redirection,
-  multi-monitor, or RDP yet.
-- VMs using virtio-gpu **GL scanout** (`<gl enable='yes'>`) aren't rendered.
+  Clipboard for both protocols (Settings to disable). SPICE audio, USB
+  redirection, and multi-monitor display selection are supported; no RDP yet.
+- VMs using virtio-gpu **GL scanout** (`<gl enable='yes'>`) aren't rendered —
+  use a non-GL video model or an external viewer.
 - Screenshots require a running VM with a graphics device; format is
   hypervisor-specific (usually PNG on QEMU/KVM).
 - Local builds are **ad-hoc signed**: on another Mac, right-click → Open the

@@ -24,6 +24,7 @@ struct ConsoleTab: View {
     @State private var connectedForDomainID: Int32 = -2
     @State private var hasUsbRedirection = false
     @State private var showUsbPicker = false
+    @State private var monitorPickerID = ""
     @StateObject private var detach = ConsoleDetachController()
 
     var body: some View {
@@ -62,6 +63,29 @@ struct ConsoleTab: View {
     private var consoleToolbar: some ToolbarContent {
         if consoleConnected, !showSerial {
             ToolbarItemGroup(placement: .automatic) {
+                if spice.status == .connected, spice.monitors.count > 1 {
+                    Picker("Monitor", selection: $monitorPickerID) {
+                        ForEach(Array(spice.monitors.enumerated()), id: \.element.id) { index, monitor in
+                            Text("Monitor \(index + 1) (\(monitor.label))").tag(monitor.id)
+                        }
+                    }
+                    .pickerStyle(.menu)
+                    .frame(maxWidth: 220)
+                    .onChange(of: monitorPickerID) { _, newValue in
+                        guard let monitor = spice.monitors.first(where: { $0.id == newValue }) else { return }
+                        spice.selectMonitor(channelId: monitor.channelId, monitorId: monitor.monitorId)
+                    }
+                    .onChange(of: spice.selectedMonitorID) { _, newValue in
+                        if let newValue, newValue != monitorPickerID {
+                            monitorPickerID = newValue
+                        }
+                    }
+                    .onAppear {
+                        if let selected = spice.selectedMonitorID {
+                            monitorPickerID = selected
+                        }
+                    }
+                }
                 if spice.status == .connected, preferences.spiceUsbEnabled {
                     Button { showUsbPicker = true } label: {
                         Label("USB Devices", systemImage: "cable.connector")

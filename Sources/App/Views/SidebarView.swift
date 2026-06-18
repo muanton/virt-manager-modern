@@ -212,11 +212,7 @@ private struct DomainRow: View {
                 .foregroundStyle(domain.state.color)
             VStack(alignment: .leading, spacing: 1) {
                 Text(domain.name)
-                Text(subtitle)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .monospacedDigit()
-                    .lineLimit(2)
+                statsCaption
             }
             Spacer(minLength: 0)
             if hasConfigDrift {
@@ -229,21 +225,28 @@ private struct DomainRow: View {
         .padding(.vertical, 2)
     }
 
-    private var subtitle: String {
-        let stateLabel = hasConfigDrift
-            ? "\(domain.state.label) · unsaved"
-            : domain.state.label
-        guard domain.isActive, let s = stats else { return stateLabel }
-        if s.diskReadBps > 0 || s.diskWriteBps > 0 || s.netRxBps > 0 || s.netTxBps > 0 {
-            return String(format: "%@ · %.0f%% · %@ · D↓%@ ↑%@ · N↓%@ ↑%@",
-                          stateLabel, s.cpuPercent,
-                          Format.memory(kiB: s.memUsedKiB),
-                          Format.rate(bytesPerSecond: s.diskReadBps),
-                          Format.rate(bytesPerSecond: s.diskWriteBps),
-                          Format.rate(bytesPerSecond: s.netRxBps),
-                          Format.rate(bytesPerSecond: s.netTxBps))
+    private var stateLabel: String {
+        hasConfigDrift ? "\(domain.state.label) · unsaved" : domain.state.label
+    }
+
+    @ViewBuilder
+    private var statsCaption: some View {
+        if domain.isActive, let s = stats {
+            VStack(alignment: .leading, spacing: 1) {
+                Text("\(stateLabel) · CPU \(Int(s.cpuPercent))% · RAM \(Format.memory(kiB: s.memUsedKiB))")
+                if s.diskReadBps > 0 || s.diskWriteBps > 0 || s.netRxBps > 0 || s.netTxBps > 0 {
+                    Text("Disk read \(Format.rate(bytesPerSecond: s.diskReadBps)) · write \(Format.rate(bytesPerSecond: s.diskWriteBps))")
+                    Text("Net in \(Format.rate(bytesPerSecond: s.netRxBps)) · out \(Format.rate(bytesPerSecond: s.netTxBps))")
+                }
+            }
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .monospacedDigit()
+            .lineLimit(3)
+        } else {
+            Text(stateLabel)
+                .font(.caption)
+                .foregroundStyle(.secondary)
         }
-        return String(format: "%@ · %.0f%% · %@", stateLabel,
-                      s.cpuPercent, Format.memory(kiB: s.memUsedKiB))
     }
 }

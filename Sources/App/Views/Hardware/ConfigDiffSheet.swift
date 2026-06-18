@@ -51,7 +51,14 @@ struct ConfigDiffSheet: View {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Close") { dismiss() }
                 }
-                ToolbarItem(placement: .primaryAction) {
+                ToolbarItemGroup(placement: .primaryAction) {
+                    Button("Revert running to saved") {
+                        Task {
+                            await model.revertLiveToSaved()
+                            dismiss()
+                        }
+                    }
+                    .disabled(model.applying)
                     Button("Update saved from running") {
                         Task {
                             await model.syncSavedFromLive()

@@ -92,6 +92,10 @@ struct HardwareTab: View {
                 .font(.callout)
             Spacer()
             Button("View diff…") { showingConfigDiff = true }
+            Button("Revert to saved") {
+                Task { await model.revertLiveToSaved() }
+            }
+            .disabled(model.applying)
             Button("Update saved from running") {
                 Task { await model.syncSavedFromLive() }
             }

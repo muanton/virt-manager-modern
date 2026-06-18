@@ -3,6 +3,34 @@ import AppKit
 import ConsoleKit
 import SpiceShim
 
+/// One guest display surface reported by the SPICE server.
+public struct SpiceMonitor: Identifiable, Equatable, Sendable {
+    public let channelId: Int
+    public let monitorId: Int
+    public let x: Int
+    public let y: Int
+    public let width: Int
+    public let height: Int
+
+    public var id: String { "\(channelId)-\(monitorId)" }
+
+    public var label: String {
+        if width > 0, height > 0 {
+            return "\(width)×\(height)"
+        }
+        return "Display"
+    }
+
+    init(_ info: VMMMonitorInfo) {
+        channelId = Int(info.channel_id)
+        monitorId = Int(info.monitor_id)
+        x = Int(info.x)
+        y = Int(info.y)
+        width = Int(info.width)
+        height = Int(info.height)
+    }
+}
+
 /// A host USB device that can be redirected into the SPICE guest.
 public struct SpiceUsbDevice: Identifiable, Equatable, Sendable {
     public let id: UInt32
@@ -39,6 +67,8 @@ public final class SpiceConsoleSession: ObservableObject {
 
     @Published public private(set) var status: Status = .idle
     @Published public private(set) var displayView: NSView?
+    @Published public private(set) var monitors: [SpiceMonitor] = []
+    @Published public private(set) var selectedMonitorID: String?
     @Published public private(set) var usbDevices: [SpiceUsbDevice] = []
     @Published public var usbMessage: String?
 
@@ -96,12 +126,14 @@ public final class SpiceConsoleSession: ObservableObject {
         cb.clipboard_guest_data = spiceClipboardData
         cb.usb_devices_changed = spiceUsbDevicesChanged
         cb.usb_redirect_result = spiceUsbRedirectResult
+        cb.monitors_changed = spiceMonitorsChanged
 
         handle = vmm_spice_session_create(host, Int32(port), target.password, cb)
         vmm_spice_audio_enable(handle, audioEnabled ? 1 : 0)
         vmm_spice_usb_enable(handle, usbEnabled ? 1 : 0)
         vmm_spice_session_start(handle)
         clipboard.start(session: self, handle: handle, enabled: clipboardEnabled)
+        refreshMonitors()
         refreshUsbDevices()
     }
 
@@ -112,6 +144,8 @@ public final class SpiceConsoleSession: ObservableObject {
         bridge.cleanup()
         tunnel?.stop(); tunnel = nil
         displayView = nil
+        monitors = []
+        selectedMonitorID = nil
         usbDevices = []
         usbMessage = nil
         status = .idle
@@ -151,6 +185,42 @@ public final class SpiceConsoleSession: ObservableObject {
         guard let handle else { return }
         vmm_spice_mouse_wheel(handle, up ? 1 : 0, mask)
     }
+
+    // MARK: - Multi-monitor
+
+    public func refreshMonitors() {
+        guard let handle else {
+            monitors = []
+            selectedMonitorID = nil
+            return
+        }
+        let sessionHandle = handle
+        Task.detached(priority: .userInitiated) { [weak self] in
+            guard let self else { return }
+            var buf = [VMMMonitorInfo](repeating: VMMMonitorInfo(), count: 16)
+            let n = buf.withUnsafeMutableBufferPointer { ptr in
+                vmm_spice_list_monitors(sessionHandle, ptr.baseAddress, Int32(ptr.count))
+            }
+            let list = (0..<Int(n)).map { SpiceMonitor(buf[$0]) }
+            await MainActor.run {
+                self.monitors = list
+                if let selected = self.selectedMonitorID,
+                   list.contains(where: { $0.id == selected }) {
+                    return
+                }
+                self.selectedMonitorID = list.first?.id
+            }
+        }
+    }
+
+    public func selectMonitor(channelId: Int, monitorId: Int) {
+        guard let handle else { return }
+        let key = "\(channelId)-\(monitorId)"
+        selectedMonitorID = key
+        vmm_spice_select_monitor(handle, Int32(channelId), Int32(monitorId))
+    }
+
+    func handleMonitorsChanged() { refreshMonitors() }
 
     // MARK: - USB redirection
 

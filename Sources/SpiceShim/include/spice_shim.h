@@ -32,11 +32,23 @@ typedef struct {
     void (*clipboard_guest_release)(void *ctx, unsigned selection);
     void (*clipboard_guest_data)(void *ctx, unsigned selection, uint32_t type,
                                  const uint8_t *data, size_t size);
+    /* Guest monitor layout changed (plug/unplug or SPICE reconfig). Runner thread. */
+    void (*monitors_changed)(void *ctx);
     /* USB device list changed (plug/unplug or redirect state). Runner thread. */
     void (*usb_devices_changed)(void *ctx);
     /* Result of connect/disconnect redirect (runner thread). */
     void (*usb_redirect_result)(void *ctx, uint32_t device_id, int ok, const char *error);
 } VMMSpiceCallbacks;
+
+/** One guest display surface reported by a SPICE display channel. */
+typedef struct {
+    int channel_id;
+    int monitor_id;
+    int x;
+    int y;
+    int width;
+    int height;
+} VMMMonitorInfo;
 
 /** One host USB device visible to spice-gtk's device manager. */
 typedef struct {
@@ -81,6 +93,9 @@ void vmm_spice_usb_enable(VMMSpiceSession *s, int enabled);
 int vmm_spice_usb_list_devices(VMMSpiceSession *s, VMMUsbDeviceInfo *out, int max_count);
 void vmm_spice_usb_connect(VMMSpiceSession *s, uint32_t device_id);
 void vmm_spice_usb_disconnect(VMMSpiceSession *s, uint32_t device_id);
+
+int vmm_spice_list_monitors(VMMSpiceSession *s, VMMMonitorInfo *out, int max_count);
+void vmm_spice_select_monitor(VMMSpiceSession *s, int channel_id, int monitor_id);
 
 const char *vmm_spice_version(void);
 

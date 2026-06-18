@@ -3,6 +3,7 @@
 #include <spice-client.h>
 #include <channel-main.h>
 #include <spice-audio.h>
+#include <channel-display.h>
 #include <usb-device-manager.h>
 #include <spice/vd_agent.h>
 #include <glib.h>
@@ -15,6 +16,9 @@
 #define SHIMLOG(...) do { if (getenv("VMM_SPICE_DEBUG")) { \
     fprintf(stderr, "VMMSPICE: " __VA_ARGS__); fputc('\n', stderr); fflush(stderr); } } while (0)
 
+#define VMM_SPICE_MAX_DISPLAYS 4
+#define VMM_SPICE_MAX_MONITORS 16
+
 struct VMMSpiceSession {
     char *host;
     int   port;
@@ -24,6 +28,11 @@ struct VMMSpiceSession {
     SpiceSession       *session;
     SpiceChannel       *main_channel;
     SpiceChannel       *display;
+    SpiceChannel       *displays[VMM_SPICE_MAX_DISPLAYS];
+    int active_channel_id;
+    int active_monitor_id;
+    VMMMonitorInfo monitors[VMM_SPICE_MAX_MONITORS];
+    int monitor_count;
     SpiceInputsChannel *inputs;
 
     int announced_connected;
@@ -74,8 +83,10 @@ static void ensure_runner(void) {
 static void on_primary_create(SpiceChannel *channel, gint format, gint width,
                               gint height, gint stride, gint shmid,
                               gpointer imgdata, gpointer user_data) {
-    (void)channel; (void)shmid;
+    (void)shmid;
     VMMSpiceSession *s = user_data;
+    if (channel != s->display)
+        return;
     SHIMLOG("primary-create %dx%d format=%d stride=%d", width, height, format, stride);
     if (s->cb.primary_create)
         s->cb.primary_create(s->cb.ctx, format, width, height, stride,
@@ -87,16 +98,92 @@ static void on_primary_create(SpiceChannel *channel, gint format, gint width,
 }
 
 static void on_primary_destroy(SpiceChannel *channel, gpointer user_data) {
-    (void)channel;
     VMMSpiceSession *s = user_data;
+    if (channel != s->display)
+        return;
     if (s->cb.primary_destroy) s->cb.primary_destroy(s->cb.ctx);
 }
 
 static void on_invalidate(SpiceChannel *channel, gint x, gint y, gint w, gint h,
                           gpointer user_data) {
-    (void)channel;
     VMMSpiceSession *s = user_data;
+    if (channel != s->display)
+        return;
     if (s->cb.invalidate) s->cb.invalidate(s->cb.ctx, x, y, w, h);
+}
+
+static int main_display_id(VMMSpiceSession *s, int channel_id, int monitor_id) {
+    (void)s;
+    return channel_id + monitor_id;
+}
+
+static void refresh_primary_framebuffer(VMMSpiceSession *s) {
+    if (!s->display || !s->cb.primary_create)
+        return;
+    SpiceDisplayPrimary primary;
+    if (!spice_display_channel_get_primary(s->display, 0, &primary))
+        return;
+    if (!primary.data || primary.width <= 0 || primary.height <= 0)
+        return;
+    s->cb.primary_create(s->cb.ctx, primary.format, primary.width, primary.height,
+                         primary.stride, (const uint8_t *)primary.data);
+}
+
+static void apply_active_monitor(VMMSpiceSession *s) {
+    if (!s->main_channel)
+        return;
+    SpiceMainChannel *main = SPICE_MAIN_CHANNEL(s->main_channel);
+    for (int i = 0; i < s->monitor_count; i++) {
+        VMMMonitorInfo *m = &s->monitors[i];
+        int slot = main_display_id(s, m->channel_id, m->monitor_id);
+        gboolean on = (m->channel_id == s->active_channel_id
+                       && m->monitor_id == s->active_monitor_id);
+        spice_main_channel_update_display_enabled(main, slot, on, TRUE);
+    }
+    if (s->active_channel_id >= 0 && s->active_channel_id < VMM_SPICE_MAX_DISPLAYS)
+        s->display = s->displays[s->active_channel_id];
+    refresh_primary_framebuffer(s);
+}
+
+static void rebuild_monitor_list(VMMSpiceSession *s) {
+    s->monitor_count = 0;
+    for (int ch = 0; ch < VMM_SPICE_MAX_DISPLAYS; ch++) {
+        SpiceChannel *channel = s->displays[ch];
+        if (!channel)
+            continue;
+        GArray *mons = NULL;
+        g_object_get(channel, "monitors", &mons, NULL);
+        if (!mons)
+            continue;
+        for (guint i = 0; i < mons->len && s->monitor_count < VMM_SPICE_MAX_MONITORS; i++) {
+            SpiceDisplayMonitorConfig *cfg =
+                &g_array_index(mons, SpiceDisplayMonitorConfig, i);
+            VMMMonitorInfo *m = &s->monitors[s->monitor_count++];
+            m->channel_id = ch;
+            m->monitor_id = (int)cfg->id;
+            m->x = (int)cfg->x;
+            m->y = (int)cfg->y;
+            m->width = (int)cfg->width;
+            m->height = (int)cfg->height;
+        }
+        g_array_unref(mons);
+    }
+    if (s->monitor_count == 0) {
+        VMMMonitorInfo *m = &s->monitors[s->monitor_count++];
+        m->channel_id = s->active_channel_id;
+        m->monitor_id = s->active_monitor_id;
+        m->x = m->y = 0;
+        m->width = m->height = 0;
+    }
+}
+
+static void on_monitors_changed(GObject *obj, GParamSpec *pspec, gpointer user_data) {
+    (void)obj; (void)pspec;
+    VMMSpiceSession *s = user_data;
+    rebuild_monitor_list(s);
+    apply_active_monitor(s);
+    if (s->cb.monitors_changed)
+        s->cb.monitors_changed(s->cb.ctx);
 }
 
 static void on_gl_draw(SpiceChannel *channel, guint32 x, guint32 y,
@@ -257,14 +344,19 @@ static void on_channel_new(SpiceSession *session, SpiceChannel *channel,
     } else if (type == SPICE_CHANNEL_DISPLAY) {
         int id = -1;
         g_object_get(channel, "channel-id", &id, NULL);
-        if (id != 0) return; /* primary display only */
-        s->display = channel;
+        if (id < 0 || id >= VMM_SPICE_MAX_DISPLAYS)
+            return;
+        s->displays[id] = channel;
         g_signal_connect(channel, "display-primary-create", G_CALLBACK(on_primary_create), s);
         g_signal_connect(channel, "display-primary-destroy", G_CALLBACK(on_primary_destroy), s);
         g_signal_connect(channel, "display-invalidate", G_CALLBACK(on_invalidate), s);
         g_signal_connect(channel, "gl-draw", G_CALLBACK(on_gl_draw), s);
-        /* Secondary channels are created but not auto-connected. */
+        g_signal_connect(channel, "notify::monitors", G_CALLBACK(on_monitors_changed), s);
         spice_channel_connect(channel);
+        if (id == s->active_channel_id)
+            s->display = channel;
+        rebuild_monitor_list(s);
+        apply_active_monitor(s);
     } else if (type == SPICE_CHANNEL_INPUTS) {
         s->inputs = SPICE_INPUTS_CHANNEL(channel);
         spice_channel_connect(channel);
@@ -280,6 +372,10 @@ static void on_channel_destroy(SpiceSession *session, SpiceChannel *channel,
     (void)session;
     VMMSpiceSession *s = user_data;
     if (channel == s->display) s->display = NULL;
+    for (int i = 0; i < VMM_SPICE_MAX_DISPLAYS; i++) {
+        if (s->displays[i] == channel)
+            s->displays[i] = NULL;
+    }
     if (channel == s->main_channel) s->main_channel = NULL;
     if (SPICE_CHANNEL(s->inputs) == channel) s->inputs = NULL;
 }
@@ -523,6 +619,8 @@ static gboolean stop_cb(gpointer data) {
         s->clipboard_release_src = 0;
     }
     s->inputs = NULL; s->display = NULL; s->main_channel = NULL;
+    memset(s->displays, 0, sizeof(s->displays));
+    s->monitor_count = 0;
     s->host_clip_grabbed = 0;
     g_mutex_lock(&op->m);
     op->done = 1;
@@ -541,6 +639,8 @@ VMMSpiceSession *vmm_spice_session_create(const char *host, int port,
     s->port = port;
     s->password = (password && *password) ? g_strdup(password) : NULL;
     s->cb = callbacks;
+    s->active_channel_id = 0;
+    s->active_monitor_id = 0;
     return s;
 }
 
@@ -696,6 +796,79 @@ void vmm_spice_usb_disconnect(VMMSpiceSession *s, uint32_t device_id) {
     op->device_id = device_id;
     op->connect = 0;
     g_main_context_invoke(g_runner_ctx, usb_redirect_cb, op);
+}
+
+typedef struct {
+    VMMSpiceSession *s;
+    VMMMonitorInfo *out;
+    int max_count;
+    int count;
+    GMutex m;
+    GCond c;
+    int done;
+} MonitorListOp;
+
+static gboolean monitor_list_cb(gpointer data) {
+    MonitorListOp *op = data;
+    VMMSpiceSession *s = op->s;
+    rebuild_monitor_list(s);
+    op->count = 0;
+    if (op->out && op->max_count > 0) {
+        for (int i = 0; i < s->monitor_count && op->count < op->max_count; i++)
+            op->out[op->count++] = s->monitors[i];
+    }
+    g_mutex_lock(&op->m);
+    op->done = 1;
+    g_cond_signal(&op->c);
+    g_mutex_unlock(&op->m);
+    return G_SOURCE_REMOVE;
+}
+
+typedef struct {
+    VMMSpiceSession *s;
+    int channel_id;
+    int monitor_id;
+} MonitorSelectOp;
+
+static gboolean monitor_select_cb(gpointer data) {
+    MonitorSelectOp *op = data;
+    VMMSpiceSession *s = op->s;
+    s->active_channel_id = op->channel_id;
+    s->active_monitor_id = op->monitor_id;
+    apply_active_monitor(s);
+    g_free(op);
+    return G_SOURCE_REMOVE;
+}
+
+int vmm_spice_list_monitors(VMMSpiceSession *s, VMMMonitorInfo *out, int max_count) {
+    if (!s || !s->started || !g_runner_ctx || !out || max_count <= 0)
+        return 0;
+    MonitorListOp op;
+    op.s = s;
+    op.out = out;
+    op.max_count = max_count;
+    op.count = 0;
+    op.done = 0;
+    g_mutex_init(&op.m);
+    g_cond_init(&op.c);
+    g_main_context_invoke(g_runner_ctx, monitor_list_cb, &op);
+    g_mutex_lock(&op.m);
+    while (!op.done)
+        g_cond_wait(&op.c, &op.m);
+    g_mutex_unlock(&op.m);
+    g_mutex_clear(&op.m);
+    g_cond_clear(&op.c);
+    return op.count;
+}
+
+void vmm_spice_select_monitor(VMMSpiceSession *s, int channel_id, int monitor_id) {
+    if (!s || !s->started || !g_runner_ctx)
+        return;
+    MonitorSelectOp *op = g_new(MonitorSelectOp, 1);
+    op->s = s;
+    op->channel_id = channel_id;
+    op->monitor_id = monitor_id;
+    g_main_context_invoke(g_runner_ctx, monitor_select_cb, op);
 }
 
 void vmm_spice_audio_enable(VMMSpiceSession *s, int enabled) {

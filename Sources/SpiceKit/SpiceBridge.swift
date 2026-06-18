@@ -147,6 +147,10 @@ let spiceClipboardData: @convention(c) (
     DispatchQueue.main.async { bridge.clipboard?.guestData(type: type, data: bytes) }
 }
 
+let spiceMonitorsChanged: @convention(c) (UnsafeMutableRawPointer?) -> Void = { ctx in
+    DispatchQueue.main.async { spiceBridge(ctx)?.session?.handleMonitorsChanged() }
+}
+
 let spiceUsbDevicesChanged: @convention(c) (UnsafeMutableRawPointer?) -> Void = { ctx in
     DispatchQueue.main.async { spiceBridge(ctx)?.session?.handleUsbDevicesChanged() }
 }

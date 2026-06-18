@@ -111,6 +111,20 @@ final class HardwareModel: ObservableObject {
         }
     }
 
+    /// Drops unsaved live hotplug changes and restores the running guest toward saved XML.
+    func revertLiveToSaved() async {
+        applying = true
+        defer { applying = false }
+        do {
+            try await session.revertLiveToSaved(uuid: uuid)
+            applyMessage = "Running configuration reverted toward saved."
+            await refreshConfigSyncState()
+            await load()
+        } catch {
+            applyMessage = error.localizedDescription
+        }
+    }
+
     /// Writes the running configuration to the saved definition (survives reboot).
     func syncSavedFromLive() async {
         guard let liveXML else { return }

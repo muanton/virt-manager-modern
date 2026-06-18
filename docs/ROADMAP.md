@@ -39,8 +39,16 @@ How the app's feature set maps onto what libvirt offers for **remote** managemen
 | VM screenshot | `virDomainScreenshot` | ✅ (Overview tab) |
 | App preferences (clipboard, default tab) | — | ✅ |
 | VNC clipboard redirection | RoyalVNCKit | ✅ |
-| SPICE audio / USB redirection | spice-gtk channels | ⬜ later |
-| Multi-monitor / virtio-gpu GL scanout | spice-gtk | ⬜ later |
+| SPICE audio (playback + mic) | spice-gtk playback/record channels | ✅ |
+| SPICE USB redirection | spice-gtk usbredir channel | ✅ |
+| SPICE USB device picker (console toolbar) | `SpiceUsbDeviceManager` | ✅ |
+| Block / disk I/O stats (Overview) | `virConnectGetAllDomainStats` | ✅ |
+| Network I/O stats (Overview) | `virConnectGetAllDomainStats` | ✅ |
+| Per-device disk & NIC I/O (Overview) | `VIR_DOMAIN_STATS_BLOCK` / `INTERFACE` | ✅ |
+| Config drift detection (live vs saved XML) | `virDomainGetXMLDesc` flags | ✅ |
+| Config drift revert + power-off warnings | live attach/detach, vCPU/memory | ✅ |
+| SPICE multi-monitor (display picker) | spice-gtk display channels | ✅ |
+| virtio-gpu GL scanout | spice-gtk `gl-draw` | ⬜ later |
 | Migration between hosts | `virDomainMigrate*` | ⬜ — single-host focus |
 | Checkpoints / incremental backup | `virDomainCheckpoint*` | ⬜ niche |
 | Secrets management (ceph/iscsi auth) | `virSecret*` | ⬜ niche |

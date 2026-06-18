@@ -429,6 +429,34 @@ final class ConnectionSession: ObservableObject, Identifiable {
         try await requireConnection().domainIsUpdated(uuid: uuid)
     }
 
+    /// Reverts hot-pluggable live changes toward the saved configuration.
+    func revertLiveToSaved(uuid: String) async throws {
+        let conn = try requireConnection()
+        let liveXML = try await conn.domainLiveXML(uuid: uuid)
+        let savedXML = try await conn.domainPersistentXML(uuid: uuid)
+        let live = try DomainConfig(xml: liveXML)
+        let saved = try DomainConfig(xml: savedXML)
+
+        if live.vcpu != saved.vcpu {
+            try await conn.setLiveVcpus(uuid: uuid, count: saved.vcpu)
+        }
+        if live.currentMemoryKiB != saved.currentMemoryKiB {
+            try await conn.setLiveMemory(uuid: uuid, kib: saved.currentMemoryKiB)
+        }
+
+        let liveMap = live.deviceXMLBySignature()
+        let savedMap = saved.deviceXMLBySignature()
+        for sig in Set(liveMap.keys).subtracting(savedMap.keys).sorted() {
+            guard let xml = liveMap[sig] else { continue }
+            try await conn.detachDevice(uuid: uuid, deviceXML: xml, live: true, persistent: false)
+        }
+        for sig in Set(savedMap.keys).subtracting(liveMap.keys).sorted() {
+            guard let xml = savedMap[sig] else { continue }
+            try await conn.attachDevice(uuid: uuid, deviceXML: xml, live: true, persistent: false)
+        }
+        await refreshConfigDrift()
+    }
+
     func snapshots(uuid: String) async throws -> [Snapshot] {
         try await requireConnection().listSnapshots(uuid: uuid)
     }
