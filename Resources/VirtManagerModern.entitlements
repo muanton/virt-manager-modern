@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- Non-sandboxed developer tool. Hardened Runtime is enabled via
+	     codesign --options runtime in Scripts/sign-and-notarize.sh.
+	     Add entitlements here only if notarization rejects the submission. -->
+</dict>
+</plist>

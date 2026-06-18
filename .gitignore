@@ -2,6 +2,7 @@
 .swiftpm/
 third_party/
 VirtManagerModern.app/
+dist/
 .DS_Store
 *.xcodeproj
 .idea/

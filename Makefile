@@ -10,7 +10,11 @@ DEPS_PREFIX = third_party/prefix
 #   sdk-pc          — synthesized libffi/zlib/libxml .pc files
 export PKG_CONFIG_PATH = $(CURDIR)/$(DEPS_PREFIX)/lib/pkgconfig:$(CURDIR)/$(DEPS_PREFIX)/share/pkgconfig:$(CURDIR)/third_party/sdk-pc
 
-.PHONY: all deps build app run run-dev test clean distclean
+ENTITLEMENTS = Resources/VirtManagerModern.entitlements
+VERSION = $(shell plutil -extract CFBundleShortVersionString raw Resources/Info.plist 2>/dev/null)
+RELEASE_ZIP = dist/$(APP_NAME)-$(VERSION).zip
+
+.PHONY: all deps build app sign release run run-dev test clean distclean
 
 all: app
 
@@ -43,6 +47,14 @@ app: build
 	@# Re-sign (ad hoc) — install_name_tool invalidated the signatures.
 	@codesign --force --deep --sign - "$(APP_BUNDLE)" 2>/dev/null || true
 	@echo "Built $(APP_BUNDLE)"
+
+# Developer ID sign only — requires enrollment + cert in Keychain.
+sign: app
+	./Scripts/sign-and-notarize.sh --sign-only "$(APP_BUNDLE)"
+
+# Sign, notarize, staple, and zip into dist/ for GitHub Release upload.
+release: app
+	./Scripts/sign-and-notarize.sh "$(APP_BUNDLE)"
 
 run: app
 	open "$(APP_BUNDLE)"
