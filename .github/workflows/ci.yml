@@ -7,10 +7,11 @@ on:
     branches: [main]
 
 jobs:
-  test:
+  build-and-test:
+    name: Build & test (macOS)
     runs-on: macos-14
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Build C dependencies
         run: make deps
