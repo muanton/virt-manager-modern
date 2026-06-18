@@ -278,6 +278,10 @@ final class ConnectionSession: ObservableObject, Identifiable {
         try await requireConnection().guestAgentStatus(uuid: uuid)
     }
 
+    func guestInfo(uuid: String) async throws -> GuestInfo {
+        try await requireConnection().guestInfo(uuid: uuid)
+    }
+
     func domainXML(uuid: String) async throws -> String {
         try await requireConnection().domainXML(uuid: uuid)
     }

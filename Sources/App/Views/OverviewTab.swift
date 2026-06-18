@@ -8,7 +8,9 @@ struct OverviewTab: View {
     let domain: DomainSummary
 
     @State private var ifaces: [IfaceAddr] = []
+    @State private var guestInfo: GuestInfo?
     @State private var agentStatus: GuestAgentStatus = .inactive
+    @State private var guestLoaded = false
     @State private var ifacesLoaded = false
     @State private var hasManagedSave = false
     @State private var screenshotData: Data?
@@ -35,7 +37,7 @@ struct OverviewTab: View {
                 if domain.isActive {
                     LabeledContent("QEMU guest agent") {
                         HStack(spacing: 6) {
-                            if !ifacesLoaded {
+                            if !guestLoaded {
                                 ProgressView().controlSize(.small)
                             } else {
                                 Image(systemName: agentStatus.symbol)
@@ -43,6 +45,42 @@ struct OverviewTab: View {
                                 Text(agentStatus.label)
                             }
                         }
+                    }
+                }
+            }
+            if domain.isActive {
+                Section("Guest") {
+                    if !guestLoaded {
+                        ProgressView().controlSize(.small)
+                    } else if let guestInfo, !guestInfo.isEmpty {
+                        if let hostname = guestInfo.hostname {
+                            LabeledContent("Hostname", value: hostname)
+                                .textSelection(.enabled)
+                        }
+                        if let os = guestInfo.osLabel {
+                            LabeledContent("Operating system", value: os)
+                                .textSelection(.enabled)
+                        }
+                        if !guestInfo.mounts.isEmpty {
+                            ForEach(guestInfo.mounts) { mount in
+                                LabeledContent(mount.mountpoint) {
+                                    VStack(alignment: .trailing, spacing: 4) {
+                                        HStack(spacing: 8) {
+                                            ProgressView(value: mount.usedFraction)
+                                                .frame(width: 120)
+                                            Text("\(Format.bytes(mount.usedBytes)) of \(Format.bytes(mount.totalBytes))")
+                                                .monospacedDigit()
+                                        }
+                                        Text(mount.fstype)
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                    }
+                                }
+                            }
+                        }
+                    } else if agentStatus == .unavailable {
+                        Text("Install and start the QEMU guest agent in the VM to see hostname, OS, and disk usage.")
+                            .foregroundStyle(.secondary)
                     }
                 }
             }
@@ -131,6 +169,7 @@ struct OverviewTab: View {
         .formStyle(.grouped)
         .task(id: "\(domain.uuid)-\(domain.state.rawValue)") {
             hasManagedSave = (try? await session.hasManagedSave(uuid: domain.uuid)) ?? false
+            guestLoaded = false
             ifacesLoaded = false
             screenshotData = nil
             screenshotError = nil
@@ -138,12 +177,21 @@ struct OverviewTab: View {
             while !Task.isCancelled {
                 guard domain.isActive else {
                     ifaces = []
+                    guestInfo = nil
                     agentStatus = .inactive
                     screenshotData = nil
+                    guestLoaded = true
                     ifacesLoaded = true
                     return
                 }
-                agentStatus = (try? await session.guestAgentStatus(uuid: domain.uuid)) ?? .unavailable
+                if let info = try? await session.guestInfo(uuid: domain.uuid) {
+                    guestInfo = info
+                    agentStatus = info.isEmpty ? .unavailable : .connected
+                } else {
+                    guestInfo = nil
+                    agentStatus = .unavailable
+                }
+                guestLoaded = true
                 ifaces = (try? await session.interfaceAddresses(uuid: domain.uuid)) ?? []
                 ifacesLoaded = true
                 try? await Task.sleep(for: .seconds(10))

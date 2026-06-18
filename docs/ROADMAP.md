@@ -20,7 +20,7 @@ How the app's feature set maps onto what libvirt offers for **remote** managemen
 | SPICE clipboard (UTF-8 text) | spice-gtk main channel | ✅ |
 | Live performance stats (CPU %, memory) | `virConnectGetAllDomainStats` | ✅ (5 s poll) |
 | Guest IP addresses | `virDomainInterfaceAddresses` (agent/lease) | ✅ |
-| QEMU guest agent status | `virDomainGetGuestInfo` | ✅ |
+| Guest agent info (hostname, OS, mounts) | `virDomainGetGuestInfo` | ✅ |
 | Snapshots (create/revert/delete) | `virDomainSnapshot*` | ✅ |
 | Clone VM | XML transform + `virStorageVolCreateXMLFrom` | ✅ |
 | ISO upload from the client | `virStorageVolUpload` + streams | ✅ |
