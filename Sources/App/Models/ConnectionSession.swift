@@ -23,6 +23,13 @@ final class ConnectionSession: ObservableObject, Identifiable {
     @Published private(set) var configDrift: [String: Bool] = [:]
     @Published private(set) var pools: [StoragePoolInfo] = []
 
+    struct DeviceIORates: Identifiable, Equatable {
+        let id: String
+        let label: String
+        var readBps: UInt64
+        var writeBps: UInt64
+    }
+
     struct VMStats {
         var cpuPercent: Double
         var memUsedKiB: UInt64
@@ -31,10 +38,14 @@ final class ConnectionSession: ObservableObject, Identifiable {
         var diskWriteBps: UInt64
         var netRxBps: UInt64
         var netTxBps: UInt64
+        var blockDevices: [DeviceIORates] = []
+        var netDevices: [DeviceIORates] = []
     }
     private var lastCPUSamples: [String: (timeNs: UInt64, at: Date)] = [:]
     private var lastBlockSamples: [String: (readBytes: UInt64, writeBytes: UInt64, at: Date)] = [:]
     private var lastNetSamples: [String: (rxBytes: UInt64, txBytes: UInt64, at: Date)] = [:]
+    private var lastBlockDeviceSamples: [String: [String: (read: UInt64, write: UInt64, at: Date)]] = [:]
+    private var lastNetDeviceSamples: [String: [String: (read: UInt64, write: UInt64, at: Date)]] = [:]
 
     @Published private(set) var networks: [VirtNetwork] = []
     @Published private(set) var volumes: [StorageVolume] = []
@@ -117,6 +128,8 @@ final class ConnectionSession: ObservableObject, Identifiable {
                 lastCPUSamples.removeValue(forKey: uuid)
                 lastBlockSamples.removeValue(forKey: uuid)
                 lastNetSamples.removeValue(forKey: uuid)
+                lastBlockDeviceSamples.removeValue(forKey: uuid)
+                lastNetDeviceSamples.removeValue(forKey: uuid)
             } else {
                 Task { await refreshDomainList() }
             }
@@ -158,6 +171,8 @@ final class ConnectionSession: ObservableObject, Identifiable {
         lastCPUSamples = [:]
         lastBlockSamples = [:]
         lastNetSamples = [:]
+        lastBlockDeviceSamples = [:]
+        lastNetDeviceSamples = [:]
         status = .reconnecting
     }
 
@@ -277,19 +292,64 @@ final class ConnectionSession: ObservableObject, Identifiable {
             }
             lastNetSamples[uuid] = (s.netRxBytes, s.netTxBytes, now)
 
+            let blockRates = Self.deviceIORates(
+                devices: s.blockDevices.map { ("b\($0.index)", $0.name, $0.readBytes, $0.writeBytes) },
+                last: lastBlockDeviceSamples[uuid] ?? [:],
+                now: now,
+                fallback: stats[uuid]?.blockDevices ?? [])
+            lastBlockDeviceSamples[uuid] = blockRates.last
+
+            let netRates = Self.deviceIORates(
+                devices: s.netDevices.map { ("n\($0.index)", $0.name, $0.rxBytes, $0.txBytes) },
+                last: lastNetDeviceSamples[uuid] ?? [:],
+                now: now,
+                fallback: stats[uuid]?.netDevices ?? [])
+            lastNetDeviceSamples[uuid] = netRates.last
+
             next[uuid] = VMStats(cpuPercent: cpu,
                                  memUsedKiB: s.balloonRSSKiB,
                                  memTotalKiB: s.balloonCurrentKiB,
                                  diskReadBps: readBps,
                                  diskWriteBps: writeBps,
                                  netRxBps: rxBps,
-                                 netTxBps: txBps)
+                                 netTxBps: txBps,
+                                 blockDevices: blockRates.rates,
+                                 netDevices: netRates.rates)
         }
         stats = next
         lastCPUSamples = lastCPUSamples.filter { next[$0.key] != nil }
         lastBlockSamples = lastBlockSamples.filter { next[$0.key] != nil }
         lastNetSamples = lastNetSamples.filter { next[$0.key] != nil }
+        lastBlockDeviceSamples = lastBlockDeviceSamples.filter { next[$0.key] != nil }
+        lastNetDeviceSamples = lastNetDeviceSamples.filter { next[$0.key] != nil }
         await refreshConfigDrift()
+    }
+
+    private static func deviceIORates(
+        devices: [(id: String, label: String, read: UInt64, write: UInt64)],
+        last: [String: (read: UInt64, write: UInt64, at: Date)],
+        now: Date,
+        fallback: [DeviceIORates]
+    ) -> (rates: [DeviceIORates], last: [String: (read: UInt64, write: UInt64, at: Date)]) {
+        var nextLast = last
+        var rates: [DeviceIORates] = []
+        for d in devices {
+            var readBps: UInt64 = 0, writeBps: UInt64 = 0
+            if let prev = last[d.id], d.read >= prev.read, d.write >= prev.write {
+                let elapsed = now.timeIntervalSince(prev.at)
+                if elapsed > 0.2 {
+                    readBps = UInt64(Double(d.read - prev.read) / elapsed)
+                    writeBps = UInt64(Double(d.write - prev.write) / elapsed)
+                } else {
+                    readBps = fallback.first(where: { $0.id == d.id })?.readBps ?? 0
+                    writeBps = fallback.first(where: { $0.id == d.id })?.writeBps ?? 0
+                }
+            }
+            nextLast[d.id] = (d.read, d.write, now)
+            rates.append(DeviceIORates(id: d.id, label: d.label,
+                                       readBps: readBps, writeBps: writeBps))
+        }
+        return (rates, nextLast)
     }
 
     func hasConfigDrift(uuid: String) -> Bool {

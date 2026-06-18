@@ -1,6 +1,22 @@
 import CLibvirt
 import Foundation
 
+/// Per-disk cumulative block counters from `block.N.*` stats.
+public struct BlockDeviceStats: Sendable, Equatable {
+    public let index: Int
+    public let name: String
+    public let readBytes: UInt64
+    public let writeBytes: UInt64
+}
+
+/// Per-NIC cumulative network counters from `net.N.*` stats.
+public struct NetDeviceStats: Sendable, Equatable {
+    public let index: Int
+    public let name: String
+    public let rxBytes: UInt64
+    public let txBytes: UInt64
+}
+
 /// One poll's worth of runtime counters for a domain.
 public struct DomainStats: Sendable {
     public let cpuTimeNs: UInt64          // cumulative guest CPU time
@@ -11,6 +27,8 @@ public struct DomainStats: Sendable {
     public let blockWriteBytes: UInt64      // cumulative write bytes (all disks)
     public let netRxBytes: UInt64           // cumulative NIC receive bytes
     public let netTxBytes: UInt64           // cumulative NIC transmit bytes
+    public let blockDevices: [BlockDeviceStats]
+    public let netDevices: [NetDeviceStats]
 }
 
 /// Whether the QEMU guest agent is reachable for a running VM.
@@ -68,8 +86,8 @@ extension LibvirtConnection {
                 let uuid = String(cString: uuidBuf)
 
                 var cpuTime: UInt64 = 0, current: UInt64 = 0, rss: UInt64 = 0, vcpus = 0
-                var rdBytes: UInt64 = 0, wrBytes: UInt64 = 0
-                var rxBytes: UInt64 = 0, txBytes: UInt64 = 0
+                var blockAccum: [Int: (name: String?, rd: UInt64, wr: UInt64)] = [:]
+                var netAccum: [Int: (name: String?, rx: UInt64, tx: UInt64)] = [:]
                 for j in 0..<Int(rec.pointee.nparams) {
                     let p = rec.pointee.params[j]
                     let name = Self.paramName(p)
@@ -79,21 +97,48 @@ extension LibvirtConnection {
                     case "balloon.rss":     rss = Self.paramUInt64(p) ?? 0
                     case "vcpu.current":    vcpus = Int(Self.paramUInt64(p) ?? 0)
                     default:
-                        if name.hasPrefix("block."), name.hasSuffix(".rd.bytes") {
-                            rdBytes &+= Self.paramUInt64(p) ?? 0
-                        } else if name.hasPrefix("block."), name.hasSuffix(".wr.bytes") {
-                            wrBytes &+= Self.paramUInt64(p) ?? 0
-                        } else if name.hasPrefix("net."), name.hasSuffix(".rx.bytes") {
-                            rxBytes &+= Self.paramUInt64(p) ?? 0
-                        } else if name.hasPrefix("net."), name.hasSuffix(".tx.bytes") {
-                            txBytes &+= Self.paramUInt64(p) ?? 0
+                        if let (idx, suffix) = Self.indexedSuffix(name, prefix: "block.") {
+                            var slot = blockAccum[idx] ?? (nil, 0, 0)
+                            switch suffix {
+                            case "name": slot.name = Self.paramString(p)
+                            case "rd.bytes": slot.rd = Self.paramUInt64(p) ?? 0
+                            case "wr.bytes": slot.wr = Self.paramUInt64(p) ?? 0
+                            default: break
+                            }
+                            blockAccum[idx] = slot
+                        } else if let (idx, suffix) = Self.indexedSuffix(name, prefix: "net.") {
+                            var slot = netAccum[idx] ?? (nil, 0, 0)
+                            switch suffix {
+                            case "name": slot.name = Self.paramString(p)
+                            case "rx.bytes": slot.rx = Self.paramUInt64(p) ?? 0
+                            case "tx.bytes": slot.tx = Self.paramUInt64(p) ?? 0
+                            default: break
+                            }
+                            netAccum[idx] = slot
                         }
                     }
                 }
+                let blocks = blockAccum.keys.sorted().map { idx in
+                    let b = blockAccum[idx]!
+                    return BlockDeviceStats(index: idx,
+                                            name: b.name ?? "disk \(idx)",
+                                            readBytes: b.rd, writeBytes: b.wr)
+                }
+                let nets = netAccum.keys.sorted().map { idx in
+                    let n = netAccum[idx]!
+                    return NetDeviceStats(index: idx,
+                                          name: n.name ?? "nic \(idx)",
+                                          rxBytes: n.rx, txBytes: n.tx)
+                }
+                let rdBytes = blocks.reduce(0) { $0 + $1.readBytes }
+                let wrBytes = blocks.reduce(0) { $0 + $1.writeBytes }
+                let rxBytes = nets.reduce(0) { $0 + $1.rxBytes }
+                let txBytes = nets.reduce(0) { $0 + $1.txBytes }
                 out[uuid] = DomainStats(cpuTimeNs: cpuTime, balloonCurrentKiB: current,
                                         balloonRSSKiB: rss, vcpuCount: vcpus,
                                         blockReadBytes: rdBytes, blockWriteBytes: wrBytes,
-                                        netRxBytes: rxBytes, netTxBytes: txBytes)
+                                        netRxBytes: rxBytes, netTxBytes: txBytes,
+                                        blockDevices: blocks, netDevices: nets)
             }
             return out
         }
@@ -181,5 +226,19 @@ extension LibvirtConnection {
         case VIR_TYPED_PARAM_INT.rawValue:    return p.value.i >= 0 ? UInt64(p.value.i) : nil
         default: return nil
         }
+    }
+
+    private static func paramString(_ p: virTypedParameter) -> String? {
+        guard UInt32(p.type) == VIR_TYPED_PARAM_STRING.rawValue, let s = p.value.s else { return nil }
+        return String(cString: s)
+    }
+
+    /// Parses `prefix` + index + `.` + suffix, e.g. `block.2.rd.bytes` → (2, "rd.bytes").
+    private static func indexedSuffix(_ name: String, prefix: String) -> (Int, String)? {
+        guard name.hasPrefix(prefix) else { return nil }
+        let rest = name.dropFirst(prefix.count)
+        guard let dot = rest.firstIndex(of: ".") else { return nil }
+        guard let idx = Int(rest[..<dot]) else { return nil }
+        return (idx, String(rest[rest.index(after: dot)...]))
     }
 }

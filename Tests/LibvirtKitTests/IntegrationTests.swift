@@ -129,6 +129,8 @@ final class IntegrationTests: XCTestCase {
             _ = s.blockWriteBytes
             _ = s.netRxBytes
             _ = s.netTxBytes
+            _ = s.blockDevices
+            _ = s.netDevices
         }
     }
 

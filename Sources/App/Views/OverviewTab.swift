@@ -111,14 +111,12 @@ struct OverviewTab: View {
                                 .monospacedDigit()
                         }
                     }
-                    LabeledContent("Disk I/O") {
-                        Text("↓ \(Format.rate(bytesPerSecond: s.diskReadBps)) · ↑ \(Format.rate(bytesPerSecond: s.diskWriteBps))")
-                            .monospacedDigit()
-                    }
-                    LabeledContent("Network I/O") {
-                        Text("↓ \(Format.rate(bytesPerSecond: s.netRxBps)) · ↑ \(Format.rate(bytesPerSecond: s.netTxBps))")
-                            .monospacedDigit()
-                    }
+                    PerDeviceIORow(title: "Disk I/O",
+                                   totalRead: s.diskReadBps, totalWrite: s.diskWriteBps,
+                                   devices: s.blockDevices)
+                    PerDeviceIORow(title: "Network I/O",
+                                   totalRead: s.netRxBps, totalWrite: s.netTxBps,
+                                   devices: s.netDevices)
                 }
             }
             if domain.isActive {
@@ -248,5 +246,42 @@ struct OverviewTab: View {
         case .unavailable: return .orange
         case .inactive: return .secondary
         }
+    }
+}
+
+/// Total I/O rate with an expandable per-device breakdown when multiple disks or NICs exist.
+private struct PerDeviceIORow: View {
+    let title: String
+    let totalRead: UInt64
+    let totalWrite: UInt64
+    let devices: [ConnectionSession.DeviceIORates]
+
+    var body: some View {
+        LabeledContent(title) {
+            if devices.count > 1 {
+                DisclosureGroup {
+                    ForEach(devices) { dev in
+                        HStack {
+                            Text(dev.label)
+                            Spacer()
+                            Text(ioRates(dev.readBps, dev.writeBps))
+                                .monospacedDigit()
+                        }
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    }
+                } label: {
+                    Text(ioRates(totalRead, totalWrite))
+                        .monospacedDigit()
+                }
+            } else {
+                Text(ioRates(totalRead, totalWrite))
+                    .monospacedDigit()
+            }
+        }
+    }
+
+    private func ioRates(_ down: UInt64, _ up: UInt64) -> String {
+        "↓ \(Format.rate(bytesPerSecond: down)) · ↑ \(Format.rate(bytesPerSecond: up))"
     }
 }
