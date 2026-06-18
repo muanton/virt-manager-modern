@@ -139,6 +139,24 @@ gstreamer, …) is compiled from **pinned upstream release tarballs** into
 Apple Silicon Mac without dependencies. See [docs/BUILDING.md](docs/BUILDING.md)
 for the details (and for bumping dependency versions).
 
+### Distribution (Developer ID + notarization)
+
+Local builds are **ad-hoc signed** (`make` / `make app`). For a Gatekeeper-
+friendly release zip, use the signing script once you have an Apple Developer
+account, a **Developer ID Application** certificate, and notary credentials:
+
+```sh
+# One-time: store notary credentials (or set NOTARY_API_KEY / _KEY_ID / _ISSUER_ID)
+xcrun notarytool store-credentials AC_NOTARY \
+  --apple-id YOU@EMAIL --team-id TEAMID --password APP-SPECIFIC-PASSWORD
+
+make sign       # Developer ID sign + verify (no notarization)
+make release    # sign → notarize → staple → dist/VirtManagerModern-<version>.zip
+```
+
+Bundle ID: `com.muanton.virtmanagermodern`. See `Scripts/sign-and-notarize.sh`
+for environment overrides and `--sign-only` usage.
+
 ## Architecture
 
 | Module | Responsibility |
@@ -158,8 +176,9 @@ for the details (and for bumping dependency versions).
 - VMs using virtio-gpu **GL scanout** (`<gl enable='yes'>`) aren't rendered.
 - Screenshots require a running VM with a graphics device; format is
   hypervisor-specific (usually PNG on QEMU/KVM).
-- The app bundle is **ad-hoc signed**: on another Mac, right-click → Open the
-  first time. Proper distribution would need Developer ID + notarization.
+- Local builds are **ad-hoc signed**: on another Mac, right-click → Open the
+  first time. Use `make release` for a notarized build (see **Distribution**
+  above); pre-built release downloads are not published yet.
 - arm64 only (the dependency build targets Apple Silicon).
 - Not sandboxed (spawns `ssh` for tunnels and the `qemu+ssh` transport).
 
