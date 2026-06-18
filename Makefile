@@ -3,7 +3,12 @@ BUILD_DIR = .build/release
 APP_BUNDLE = $(APP_NAME).app
 CONTENTS = $(APP_BUNDLE)/Contents
 DEPS_PREFIX = third_party/prefix
-export PKG_CONFIG_PATH = $(CURDIR)/$(DEPS_PREFIX)/lib/pkgconfig
+# pkg-config search path must cover everything build-deps.sh installs, so the
+# Swift build resolves the C deps WITHOUT Homebrew (as on CI):
+#   lib/pkgconfig   — most libs (spice-client-glib, glib, gstreamer, …)
+#   share/pkgconfig — spice-protocol.pc (required by spice-client-glib-2.0)
+#   sdk-pc          — synthesized libffi/zlib/libxml .pc files
+export PKG_CONFIG_PATH = $(CURDIR)/$(DEPS_PREFIX)/lib/pkgconfig:$(CURDIR)/$(DEPS_PREFIX)/share/pkgconfig:$(CURDIR)/third_party/sdk-pc
 
 .PHONY: all deps build app run run-dev test clean distclean
 
