@@ -432,6 +432,39 @@ extension DomainConfigTests {
         XCTAssertTrue(cfg.xmlString().contains("<name>orig</name>"))
     }
 
+    func testDomainConfigDiffDetectsDeviceAndMemoryChanges() throws {
+        let saved = """
+        <domain type='kvm'>
+          <name>vm</name><memory unit='KiB'>2097152</memory><vcpu>2</vcpu>
+          <os><type arch='x86_64'>hvm</type><boot dev='hd'/></os>
+          <devices>
+            <disk type='file' device='disk'>
+              <source file='/v/a.qcow2'/><target dev='vda' bus='virtio'/>
+            </disk>
+          </devices>
+        </domain>
+        """
+        let live = """
+        <domain type='kvm'>
+          <name>vm</name><memory unit='KiB'>4194304</memory><vcpu>4</vcpu>
+          <currentMemory unit='KiB'>4194304</currentMemory>
+          <os><type arch='x86_64'>hvm</type><boot dev='hd'/></os>
+          <devices>
+            <disk type='file' device='disk'>
+              <source file='/v/a.qcow2'/><target dev='vda' bus='virtio'/>
+            </disk>
+            <interface type='network'>
+              <source network='default'/><model type='virtio'/>
+            </interface>
+          </devices>
+        </domain>
+        """
+        let changes = try DomainConfigDiff.changes(liveXML: live, savedXML: saved)
+        XCTAssertTrue(changes.contains { $0.label == "vCPUs" })
+        XCTAssertTrue(changes.contains { $0.label == "Maximum memory" })
+        XCTAssertTrue(changes.contains { $0.label == "Device" && $0.liveValue.contains("NIC") })
+    }
+
     func testGuestOSCatalogIncludesCurrentReleases() {
         let ids = Set(GuestOS.catalog.map(\.id))
         XCTAssertTrue(ids.contains("ubuntu26.04"))

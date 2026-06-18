@@ -309,6 +309,18 @@ final class ConnectionSession: ObservableObject, Identifiable {
         try await requireConnection().domainXML(uuid: uuid)
     }
 
+    func domainLiveXML(uuid: String) async throws -> String {
+        try await requireConnection().domainLiveXML(uuid: uuid)
+    }
+
+    func domainPersistentXML(uuid: String) async throws -> String {
+        try await requireConnection().domainPersistentXML(uuid: uuid)
+    }
+
+    func domainIsUpdated(uuid: String) async throws -> Bool {
+        try await requireConnection().domainIsUpdated(uuid: uuid)
+    }
+
     func snapshots(uuid: String) async throws -> [Snapshot] {
         try await requireConnection().listSnapshots(uuid: uuid)
     }

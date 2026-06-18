@@ -12,6 +12,10 @@ final class HardwareModel: ObservableObject {
     @Published var loadError: String?
     @Published var applying = false
     @Published var applyMessage: String?
+    @Published private(set) var liveDiffersFromSaved = false
+    @Published private(set) var configChanges: [DomainConfigChange] = []
+    @Published private(set) var liveXML: String?
+    @Published private(set) var persistentXML: String?
 
     private(set) var config: DomainConfig?
     let session: ConnectionSession
@@ -60,8 +64,54 @@ final class HardwareModel: ObservableObject {
             devices = config?.deviceList() ?? []
             dirty = false
             loadError = nil
+            await refreshConfigSyncState()
         } catch {
             loadError = error.localizedDescription
+        }
+    }
+
+    func refreshConfigSyncState() async {
+        guard isRunning else {
+            liveDiffersFromSaved = false
+            configChanges = []
+            liveXML = nil
+            persistentXML = nil
+            return
+        }
+        do {
+            let updated = try await session.domainIsUpdated(uuid: uuid)
+            liveDiffersFromSaved = updated
+            guard updated else {
+                configChanges = []
+                liveXML = nil
+                persistentXML = nil
+                return
+            }
+            let live = try await session.domainLiveXML(uuid: uuid)
+            let saved = try await session.domainPersistentXML(uuid: uuid)
+            liveXML = live
+            persistentXML = saved
+            configChanges = try DomainConfigDiff.changes(liveXML: live, savedXML: saved)
+        } catch {
+            liveDiffersFromSaved = false
+            configChanges = []
+            liveXML = nil
+            persistentXML = nil
+        }
+    }
+
+    /// Writes the running configuration to the saved definition (survives reboot).
+    func syncSavedFromLive() async {
+        guard let liveXML else { return }
+        applying = true
+        defer { applying = false }
+        do {
+            _ = try await session.defineXML(liveXML)
+            applyMessage = "Saved configuration updated from the running VM."
+            await refreshConfigSyncState()
+            await load()
+        } catch {
+            applyMessage = error.localizedDescription
         }
     }
 

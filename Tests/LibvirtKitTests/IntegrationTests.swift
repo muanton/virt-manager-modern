@@ -110,6 +110,15 @@ final class IntegrationTests: XCTestCase {
         _ = try? await conn.screenshot(uuid: active.uuid)
     }
 
+    func testDomainPersistentXML() async throws {
+        let conn = try await LibvirtConnection.open(uri: uri)
+        defer { conn.close() }
+        let domains = try await conn.listDomains()
+        guard let domain = domains.first else { return }
+        _ = try await conn.domainPersistentXML(uuid: domain.uuid)
+        _ = try await conn.domainIsUpdated(uuid: domain.uuid)
+    }
+
     func testAllDomainStatsIncludesBlockCounters() async throws {
         let conn = try await LibvirtConnection.open(uri: uri)
         defer { conn.close() }

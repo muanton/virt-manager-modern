@@ -924,4 +924,79 @@ public struct DomainConfig {
         default:                  return value
         }
     }
+
+    // MARK: - Live vs saved diff
+
+    /// Normalized device descriptions for comparing running and persistent XML.
+    public func deviceDiffSignatures() -> Set<String> {
+        guard let devs = root.elements(forName: "devices").first else { return [] }
+        var out: Set<String> = []
+        for node in devs.children ?? [] {
+            guard let el = node as? XMLElement, let name = el.name, name != "emulator" else { continue }
+            if name == "memballoon" { continue }
+            if name == "controller", Self.isHiddenController(el) { continue }
+            if let sig = Self.deviceDiffSignature(el) { out.insert(sig) }
+        }
+        return out
+    }
+
+    private static func deviceDiffSignature(_ el: XMLElement) -> String? {
+        guard let name = el.name else { return nil }
+        switch name {
+        case "disk":
+            let dev = el.attribute(forName: "device")?.stringValue ?? "disk"
+            let target = el.elements(forName: "target").first
+            let tdev = target?.attribute(forName: "dev")?.stringValue ?? "?"
+            let bus = target?.attribute(forName: "bus")?.stringValue ?? ""
+            let src = el.elements(forName: "source").first
+            let path = src?.attribute(forName: "file")?.stringValue
+                ?? src?.attribute(forName: "dev")?.stringValue
+                ?? src?.attribute(forName: "volume")?.stringValue ?? ""
+            return "Disk (\(dev), \(bus)/\(tdev)): \(path.isEmpty ? "empty" : path)"
+        case "interface":
+            let type = el.attribute(forName: "type")?.stringValue ?? "?"
+            let src = el.elements(forName: "source").first
+            let source = src?.attribute(forName: "network")?.stringValue
+                ?? src?.attribute(forName: "bridge")?.stringValue
+                ?? src?.attribute(forName: "dev")?.stringValue ?? "?"
+            let model = el.elements(forName: "model").first?
+                .attribute(forName: "type")?.stringValue ?? "?"
+            return "NIC (\(type), \(model)): \(source)"
+        case "hostdev":
+            let type = el.attribute(forName: "type")?.stringValue ?? "?"
+            let src = el.elements(forName: "source").first
+            if let bus = src?.elements(forName: "address").first {
+                let domain = bus.attribute(forName: "domain")?.stringValue ?? "0"
+                let slot = bus.attribute(forName: "slot")?.stringValue ?? "0"
+                let func_ = bus.attribute(forName: "function")?.stringValue ?? "0"
+                return "Host device (\(type)): \(domain):\(slot).\(func_)"
+            }
+            return "Host device (\(type))"
+        case "redirdev":
+            let bus = el.attribute(forName: "bus")?.stringValue ?? "?"
+            let type = el.attribute(forName: "type")?.stringValue ?? "?"
+            return "USB redirection (\(bus), \(type))"
+        default:
+            return "\(kind(for: el).label): \(compactDeviceXML(el))"
+        }
+    }
+
+    private static func compactDeviceXML(_ el: XMLElement) -> String {
+        let copy = el.copy() as! XMLElement
+        stripVolatileDeviceNodes(copy)
+        return copy.xmlString(options: [])
+            .replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
+    }
+
+    private static func stripVolatileDeviceNodes(_ el: XMLElement) {
+        let volatile = Set(["address", "alias", "boot"])
+        for child in (el.children ?? []).reversed() {
+            guard let c = child as? XMLElement, let n = c.name else { continue }
+            if volatile.contains(n) {
+                el.removeChild(at: c.index)
+            } else {
+                stripVolatileDeviceNodes(c)
+            }
+        }
+    }
 }

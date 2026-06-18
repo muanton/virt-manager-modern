@@ -94,13 +94,41 @@ public final class LibvirtConnection: @unchecked Sendable {
     // MARK: - XML
 
     public func domainXML(uuid: String) async throws -> String {
+        try await domainXML(uuid: uuid, flags: 0)
+    }
+
+    /// Running config when the guest is active; saved config when shut off.
+    public func domainLiveXML(uuid: String) async throws -> String {
+        try await domainXML(uuid: uuid, flags: 0)
+    }
+
+    /// Saved (persistent) config — `VIR_DOMAIN_XML_INACTIVE`.
+    public func domainPersistentXML(uuid: String) async throws -> String {
+        try await domainXML(uuid: uuid, flags: UInt32(VIR_DOMAIN_XML_INACTIVE.rawValue))
+    }
+
+    public func domainXML(uuid: String, flags: UInt32) async throws -> String {
         try await run { conn in
             try Self.withDomain(conn, uuid: uuid) { dom in
-                guard let cstr = virDomainGetXMLDesc(dom, 0) else {
+                guard let cstr = virDomainGetXMLDesc(dom, flags) else {
                     throw LibvirtError.lastError(fallback: "Failed to read domain XML")
                 }
                 defer { free(cstr) }
                 return String(cString: cstr)
+            }
+        }
+    }
+
+    /// Whether live changes have not been saved to the persistent definition.
+    public func domainIsUpdated(uuid: String) async throws -> Bool {
+        try await run { conn in
+            try Self.withDomain(conn, uuid: uuid) { dom in
+                guard virDomainIsActive(dom) == 1 else { return false }
+                let rc = virDomainIsUpdated(dom)
+                guard rc >= 0 else {
+                    throw LibvirtError.lastError(fallback: "Failed to query domain update state")
+                }
+                return rc == 1
             }
         }
     }

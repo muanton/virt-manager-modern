@@ -13,6 +13,7 @@ struct HardwareTab: View {
     @StateObject private var model: HardwareModel
     @State private var selection: HardwareSelection? = .general
     @State private var showingAdd = false
+    @State private var showingConfigDiff = false
     @State private var confirmRemove: Device?
 
     init(session: ConnectionSession, uuid: String) {
@@ -24,9 +25,12 @@ struct HardwareTab: View {
     var body: some View {
         Group {
             if model.isLoaded {
-                HSplitView {
-                    sidebar.frame(minWidth: 220, idealWidth: 250, maxWidth: 320)
-                    detail.frame(minWidth: 360, maxWidth: .infinity)
+                VStack(spacing: 0) {
+                    if model.liveDiffersFromSaved { configSyncBanner }
+                    HSplitView {
+                        sidebar.frame(minWidth: 220, idealWidth: 250, maxWidth: 320)
+                        detail.frame(minWidth: 360, maxWidth: .infinity)
+                    }
                 }
             } else if let e = model.loadError {
                 ContentUnavailableView("Couldn't Load Hardware", systemImage: "exclamationmark.triangle",
@@ -40,6 +44,7 @@ struct HardwareTab: View {
             if model.dirty || model.applyMessage != nil { applyBar }
         }
         .sheet(isPresented: $showingAdd) { AddHardwareSheet(model: model) }
+        .sheet(isPresented: $showingConfigDiff) { ConfigDiffSheet(model: model) }
         .confirmationDialog(
             "Remove \(confirmRemove?.title ?? "device")?",
             isPresented: Binding(get: { confirmRemove != nil },
@@ -74,6 +79,24 @@ struct HardwareTab: View {
         if case .warning(let reason) = d.removability { lines.append(reason) }
         lines.append("The device is removed when you click Apply Changes and takes effect after the VM restarts.")
         return lines.joined(separator: "\n")
+    }
+
+    private var configSyncBanner: some View {
+        HStack(spacing: 12) {
+            Label("Running configuration differs from saved",
+                  systemImage: "exclamationmark.triangle.fill")
+                .foregroundStyle(.orange)
+                .font(.callout)
+            Spacer()
+            Button("View diff…") { showingConfigDiff = true }
+            Button("Update saved from running") {
+                Task { await model.syncSavedFromLive() }
+            }
+            .disabled(model.applying)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(Color.orange.opacity(0.12))
     }
 
     // MARK: - Sidebar
