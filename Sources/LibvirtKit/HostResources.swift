@@ -176,7 +176,13 @@ extension LibvirtConnection {
                 throw LibvirtError.lastError(fallback: "Storage pool \(name) not found")
             }
             defer { virStoragePoolFree(pool) }
-            guard virStoragePoolBuild(pool, 0) == 0 else {
+            let rc: Int32
+            if virStoragePoolIsActive(pool) == 1 {
+                rc = virStoragePoolRefresh(pool, 0)
+            } else {
+                rc = virStoragePoolBuild(pool, 0)
+            }
+            guard rc == 0 else {
                 throw LibvirtError.lastError(fallback: "Failed to refresh pool \(name)")
             }
         }
