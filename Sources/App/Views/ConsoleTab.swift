@@ -22,6 +22,8 @@ struct ConsoleTab: View {
     @State private var switching = false
     @State private var switchResult: String?
     @State private var connectedForDomainID: Int32 = -2
+    @State private var hasUsbRedirection = false
+    @State private var showUsbPicker = false
     @StateObject private var detach = ConsoleDetachController()
 
     var body: some View {
@@ -51,12 +53,21 @@ struct ConsoleTab: View {
         .task(id: taskKey) { await prepare() }
         .onDisappear { detach.reattach() }
         .toolbar { consoleToolbar }
+        .sheet(isPresented: $showUsbPicker) {
+            SpiceUsbPickerSheet(spice: spice, vmHasUsbChannel: hasUsbRedirection)
+        }
     }
 
     @ToolbarContentBuilder
     private var consoleToolbar: some ToolbarContent {
         if consoleConnected, !showSerial {
             ToolbarItemGroup(placement: .automatic) {
+                if spice.status == .connected, preferences.spiceUsbEnabled {
+                    Button { showUsbPicker = true } label: {
+                        Label("USB Devices", systemImage: "cable.connector")
+                    }
+                    .help("Redirect USB devices into the guest")
+                }
                 if detach.isDetached {
                     Button { detach.reattach() } label: {
                         Label("Reattach", systemImage: "arrow.down.right.and.arrow.up.left")
@@ -255,6 +266,7 @@ struct ConsoleTab: View {
         let g = cfg?.graphics
         graphics = g
         videoModel = cfg?.videoModel
+        hasUsbRedirection = cfg?.hasUsbRedirection ?? false
         hasSerialDevice = cfg?.deviceList().contains {
             $0.kind == .serial || $0.kind == .console
         } ?? false

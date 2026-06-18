@@ -424,6 +424,12 @@ public struct DomainConfig {
         }
     }
 
+    public var hasUsbRedirection: Bool {
+        allDeviceElements().contains {
+            $0.name == "redirdev" && $0.attribute(forName: "bus")?.stringValue == "usb"
+        }
+    }
+
     /// Graphics types already present ("spice", "vnc", …) — adding a second of
     /// the same type is rejected by QEMU.
     public var graphicsTypes: Set<String> {

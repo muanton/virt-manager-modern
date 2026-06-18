@@ -32,7 +32,20 @@ typedef struct {
     void (*clipboard_guest_release)(void *ctx, unsigned selection);
     void (*clipboard_guest_data)(void *ctx, unsigned selection, uint32_t type,
                                  const uint8_t *data, size_t size);
+    /* USB device list changed (plug/unplug or redirect state). Runner thread. */
+    void (*usb_devices_changed)(void *ctx);
+    /* Result of connect/disconnect redirect (runner thread). */
+    void (*usb_redirect_result)(void *ctx, uint32_t device_id, int ok, const char *error);
 } VMMSpiceCallbacks;
+
+/** One host USB device visible to spice-gtk's device manager. */
+typedef struct {
+    uint32_t id;              /* (bus << 8) | address — stable while plugged in */
+    char description[256];
+    int connected;            /* redirected into the guest */
+    int can_redirect;
+    char block_reason[128];   /* set when can_redirect is 0 */
+} VMMUsbDeviceInfo;
 
 /* Create a session for host:port (typically 127.0.0.1:<tunnel port>). */
 VMMSpiceSession *vmm_spice_session_create(const char *host, int port,
@@ -63,6 +76,11 @@ void vmm_spice_audio_enable(VMMSpiceSession *s, int enabled);
 
 /* USB device redirection (requires usbredir-enabled spice-gtk build). */
 void vmm_spice_usb_enable(VMMSpiceSession *s, int enabled);
+
+/* List local USB devices (blocks until the runner thread returns; safe from any thread). */
+int vmm_spice_usb_list_devices(VMMSpiceSession *s, VMMUsbDeviceInfo *out, int max_count);
+void vmm_spice_usb_connect(VMMSpiceSession *s, uint32_t device_id);
+void vmm_spice_usb_disconnect(VMMSpiceSession *s, uint32_t device_id);
 
 const char *vmm_spice_version(void);
 

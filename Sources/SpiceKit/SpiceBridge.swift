@@ -146,3 +146,16 @@ let spiceClipboardData: @convention(c) (
     let bytes = Data(bytes: data, count: size)
     DispatchQueue.main.async { bridge.clipboard?.guestData(type: type, data: bytes) }
 }
+
+let spiceUsbDevicesChanged: @convention(c) (UnsafeMutableRawPointer?) -> Void = { ctx in
+    DispatchQueue.main.async { spiceBridge(ctx)?.session?.handleUsbDevicesChanged() }
+}
+
+let spiceUsbRedirectResult: @convention(c) (
+    UnsafeMutableRawPointer?, UInt32, Int32, UnsafePointer<CChar>?) -> Void = { ctx, deviceID, ok, err in
+    let message = err.map { String(cString: $0) }
+    DispatchQueue.main.async {
+        spiceBridge(ctx)?.session?.handleUsbRedirectResult(
+            deviceID: deviceID, ok: ok != 0, error: message)
+    }
+}
