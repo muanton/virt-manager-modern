@@ -104,6 +104,10 @@ struct OverviewTab: View {
                                 .monospacedDigit()
                         }
                     }
+                    LabeledContent("Disk I/O") {
+                        Text("↓ \(Format.rate(bytesPerSecond: s.diskReadBps)) · ↑ \(Format.rate(bytesPerSecond: s.diskWriteBps))")
+                            .monospacedDigit()
+                    }
                 }
             }
             if domain.isActive {

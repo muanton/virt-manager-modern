@@ -9,6 +9,7 @@ struct PreferencesView: View {
         Form {
             Section("Console") {
                 Toggle("SPICE clipboard sharing", isOn: $prefs.spiceClipboardEnabled)
+                Toggle("SPICE audio", isOn: $prefs.spiceAudioEnabled)
                 Toggle("VNC clipboard redirection", isOn: $prefs.vncClipboardEnabled)
             }
             Section("Navigation") {

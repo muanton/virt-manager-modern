@@ -2,6 +2,7 @@
 
 #include <spice-client.h>
 #include <channel-main.h>
+#include <spice-audio.h>
 #include <spice/vd_agent.h>
 #include <glib.h>
 #include <stdio.h>
@@ -29,6 +30,8 @@ struct VMMSpiceSession {
     int clipboard_enabled;
     int host_clip_grabbed;
     guint clipboard_release_src;
+
+    int audio_enabled;
 };
 
 /* ---- Shared GLib runner ------------------------------------------------- *
@@ -259,6 +262,8 @@ static void on_channel_new(SpiceSession *session, SpiceChannel *channel,
     } else if (type == SPICE_CHANNEL_INPUTS) {
         s->inputs = SPICE_INPUTS_CHANNEL(channel);
         spice_channel_connect(channel);
+    } else if (type == SPICE_CHANNEL_PLAYBACK || type == SPICE_CHANNEL_RECORD) {
+        SHIMLOG("channel-new audio type=%d (handled by SpiceAudio)", type);
     }
 }
 
@@ -273,6 +278,23 @@ static void on_channel_destroy(SpiceSession *session, SpiceChannel *channel,
 
 /* ---- lifecycle (all session work happens on the runner thread) ---- */
 
+static void apply_audio(VMMSpiceSession *s) {
+    if (!s->session)
+        return;
+    g_object_set(s->session, "enable-audio", s->audio_enabled ? TRUE : FALSE, NULL);
+    if (s->audio_enabled) {
+        SpiceAudio *audio = spice_audio_get(s->session, g_runner_ctx);
+        SHIMLOG("audio %s (backend=%s)", audio ? "enabled" : "unavailable",
+                audio ? "gstreamer" : "none");
+    }
+}
+
+static gboolean audio_enable_cb(gpointer data) {
+    VMMSpiceSession *s = data;
+    apply_audio(s);
+    return G_SOURCE_REMOVE;
+}
+
 static gboolean start_cb(gpointer data) {
     VMMSpiceSession *s = data;
     s->session = spice_session_new();
@@ -285,7 +307,10 @@ static gboolean start_cb(gpointer data) {
     g_signal_connect(s->session, "channel-new", G_CALLBACK(on_channel_new), s);
     g_signal_connect(s->session, "channel-destroy", G_CALLBACK(on_channel_destroy), s);
 
-    SHIMLOG("connecting to %s:%d (password=%s)", s->host, s->port, s->password ? "yes" : "no");
+    apply_audio(s);
+
+    SHIMLOG("connecting to %s:%d (password=%s audio=%s)", s->host, s->port,
+            s->password ? "yes" : "no", s->audio_enabled ? "on" : "off");
     spice_session_connect(s->session);
     return G_SOURCE_REMOVE;
 }
@@ -441,6 +466,14 @@ void vmm_spice_clipboard_enable(VMMSpiceSession *s, int enabled) {
 void vmm_spice_clipboard_host_grab(VMMSpiceSession *s) {
     if (!s || !s->clipboard_enabled || !g_runner_ctx) return;
     g_main_context_invoke(g_runner_ctx, host_grab_cb, s);
+}
+
+void vmm_spice_audio_enable(VMMSpiceSession *s, int enabled) {
+    if (!s)
+        return;
+    s->audio_enabled = enabled ? 1 : 0;
+    if (s->started && g_runner_ctx)
+        g_main_context_invoke(g_runner_ctx, audio_enable_cb, s);
 }
 
 void vmm_spice_clipboard_host_notify(VMMSpiceSession *s, uint32_t type,

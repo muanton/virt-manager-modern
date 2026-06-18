@@ -58,6 +58,9 @@ void vmm_spice_clipboard_host_grab(VMMSpiceSession *s);
 void vmm_spice_clipboard_host_notify(VMMSpiceSession *s, uint32_t type,
                                      const uint8_t *data, size_t size);
 
+/* Guest audio (playback + microphone via spice-gtk / GStreamer). */
+void vmm_spice_audio_enable(VMMSpiceSession *s, int enabled);
+
 const char *vmm_spice_version(void);
 
 #ifdef __cplusplus

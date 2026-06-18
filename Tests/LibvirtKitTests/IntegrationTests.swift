@@ -110,6 +110,17 @@ final class IntegrationTests: XCTestCase {
         _ = try? await conn.screenshot(uuid: active.uuid)
     }
 
+    func testAllDomainStatsIncludesBlockCounters() async throws {
+        let conn = try await LibvirtConnection.open(uri: uri)
+        defer { conn.close() }
+        let stats = try await conn.allDomainStats()
+        for (_, s) in stats {
+            // Counters exist even when zero; fields must be readable.
+            _ = s.blockReadBytes
+            _ = s.blockWriteBytes
+        }
+    }
+
     func testStoragePoolRefresh() async throws {
         let conn = try await LibvirtConnection.open(uri: uri)
         defer { conn.close() }

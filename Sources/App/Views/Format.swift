@@ -13,6 +13,18 @@ enum Format {
         return String(format: value < 10 ? "%.1f %@" : "%.0f %@", value, units[unit])
     }
 
+    /// Formats a bytes-per-second rate (e.g. disk I/O).
+    static func rate(bytesPerSecond: UInt64) -> String {
+        let units = ["B/s", "KiB/s", "MiB/s", "GiB/s"]
+        var value = Double(bytesPerSecond)
+        var unit = 0
+        while value >= 1024 && unit < units.count - 1 {
+            value /= 1024; unit += 1
+        }
+        if bytesPerSecond == 0 { return "0 B/s" }
+        return String(format: value < 10 ? "%.1f %@" : "%.0f %@", value, units[unit])
+    }
+
     static func memory(kiB: UInt64) -> String {
         let bytes = Double(kiB) * 1024
         let units = ["KiB", "MiB", "GiB", "TiB"]

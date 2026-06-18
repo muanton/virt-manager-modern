@@ -12,6 +12,9 @@ final class AppPreferences: ObservableObject {
     @Published var vncClipboardEnabled: Bool {
         didSet { Self.set(vncClipboardEnabled, forKey: Keys.vncClipboard) }
     }
+    @Published var spiceAudioEnabled: Bool {
+        didSet { Self.set(spiceAudioEnabled, forKey: Keys.spiceAudio) }
+    }
     /// Detail tab index when opening a VM: 0 Overview, 1 Console, 2 Hardware, 3 Snapshots.
     @Published var defaultDetailTab: Int {
         didSet { Self.set(defaultDetailTab, forKey: Keys.defaultDetailTab) }
@@ -19,6 +22,7 @@ final class AppPreferences: ObservableObject {
 
     private enum Keys {
         static let spiceClipboard = "prefs.spiceClipboard"
+        static let spiceAudio = "prefs.spiceAudio"
         static let vncClipboard = "prefs.vncClipboard"
         static let defaultDetailTab = "prefs.defaultDetailTab"
     }
@@ -26,6 +30,7 @@ final class AppPreferences: ObservableObject {
     private init() {
         let d = UserDefaults.standard
         spiceClipboardEnabled = d.object(forKey: Keys.spiceClipboard) as? Bool ?? true
+        spiceAudioEnabled = d.object(forKey: Keys.spiceAudio) as? Bool ?? true
         vncClipboardEnabled = d.object(forKey: Keys.vncClipboard) as? Bool ?? true
         defaultDetailTab = min(3, max(0, d.integer(forKey: Keys.defaultDetailTab)))
     }

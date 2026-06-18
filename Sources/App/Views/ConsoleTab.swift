@@ -284,7 +284,9 @@ struct ConsoleTab: View {
         case .vnc:
             await vnc.start(target, clipboardEnabled: preferences.vncClipboardEnabled)
         case .spice:
-            await spice.start(target, clipboardEnabled: preferences.spiceClipboardEnabled)
+            await spice.start(target,
+                              clipboardEnabled: preferences.spiceClipboardEnabled,
+                              audioEnabled: preferences.spiceAudioEnabled)
         default:     break
         }
     }

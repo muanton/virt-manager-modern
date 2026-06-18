@@ -26,8 +26,11 @@ final class ConnectionSession: ObservableObject, Identifiable {
         var cpuPercent: Double
         var memUsedKiB: UInt64
         var memTotalKiB: UInt64
+        var diskReadBps: UInt64
+        var diskWriteBps: UInt64
     }
     private var lastCPUSamples: [String: (timeNs: UInt64, at: Date)] = [:]
+    private var lastBlockSamples: [String: (readBytes: UInt64, writeBytes: UInt64, at: Date)] = [:]
 
     @Published private(set) var networks: [VirtNetwork] = []
     @Published private(set) var volumes: [StorageVolume] = []
@@ -107,6 +110,7 @@ final class ConnectionSession: ObservableObject, Identifiable {
                 domains.removeAll { $0.uuid == uuid }
                 stats.removeValue(forKey: uuid)
                 lastCPUSamples.removeValue(forKey: uuid)
+                lastBlockSamples.removeValue(forKey: uuid)
             } else {
                 Task { await refreshDomainList() }
             }
@@ -142,6 +146,7 @@ final class ConnectionSession: ObservableObject, Identifiable {
         conn = nil
         stats = [:]
         lastCPUSamples = [:]
+        lastBlockSamples = [:]
         status = .reconnecting
     }
 
@@ -232,12 +237,30 @@ final class ConnectionSession: ObservableObject, Identifiable {
                 }
             }
             lastCPUSamples[uuid] = (s.cpuTimeNs, now)
+
+            var readBps: UInt64 = 0, writeBps: UInt64 = 0
+            if let prev = lastBlockSamples[uuid],
+               s.blockReadBytes >= prev.readBytes, s.blockWriteBytes >= prev.writeBytes {
+                let elapsed = now.timeIntervalSince(prev.at)
+                if elapsed > 0.2 {
+                    readBps = UInt64(Double(s.blockReadBytes - prev.readBytes) / elapsed)
+                    writeBps = UInt64(Double(s.blockWriteBytes - prev.writeBytes) / elapsed)
+                } else {
+                    readBps = stats[uuid]?.diskReadBps ?? 0
+                    writeBps = stats[uuid]?.diskWriteBps ?? 0
+                }
+            }
+            lastBlockSamples[uuid] = (s.blockReadBytes, s.blockWriteBytes, now)
+
             next[uuid] = VMStats(cpuPercent: cpu,
                                  memUsedKiB: s.balloonRSSKiB,
-                                 memTotalKiB: s.balloonCurrentKiB)
+                                 memTotalKiB: s.balloonCurrentKiB,
+                                 diskReadBps: readBps,
+                                 diskWriteBps: writeBps)
         }
         stats = next
         lastCPUSamples = lastCPUSamples.filter { next[$0.key] != nil }
+        lastBlockSamples = lastBlockSamples.filter { next[$0.key] != nil }
     }
 
     private func startPolling() {
