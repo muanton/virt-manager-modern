@@ -40,11 +40,8 @@ extension LibvirtConnection {
 
                 var params: UnsafeMutablePointer<virTypedParameter>?
                 var nparams: Int32 = 0
-                let types = UInt32(VIR_DOMAIN_GUEST_INFO_HOSTNAME.rawValue)
-                    | UInt32(VIR_DOMAIN_GUEST_INFO_OS.rawValue)
-                    | UInt32(VIR_DOMAIN_GUEST_INFO_FILESYSTEM.rawValue)
-
-                guard virDomainGetGuestInfo(dom, types, &params, &nparams, 0) >= 0,
+                // types=0: gather all supported info; unsupported agent commands are ignored.
+                guard virDomainGetGuestInfo(dom, 0, &params, &nparams, 0) >= 0,
                       let params else {
                     throw LibvirtError.lastError(fallback: "Guest agent not available")
                 }
@@ -64,7 +61,7 @@ extension LibvirtConnection {
         _ params: UnsafeMutablePointer<virTypedParameter>, _ nparams: Int32, _ name: UnsafePointer<CChar>
     ) -> String? {
         var ptr: UnsafePointer<CChar>?
-        guard virTypedParamsGetString(params, nparams, name, &ptr) == 0, let ptr else { return nil }
+        guard virTypedParamsGetString(params, nparams, name, &ptr) == 1, let ptr else { return nil }
         let s = String(cString: ptr)
         return s.isEmpty ? nil : s
     }
@@ -73,7 +70,7 @@ extension LibvirtConnection {
         _ params: UnsafeMutablePointer<virTypedParameter>, _ nparams: Int32, _ name: UnsafePointer<CChar>
     ) -> UInt64? {
         var value: UInt64 = 0
-        guard virTypedParamsGetULLong(params, nparams, name, &value) == 0 else { return nil }
+        guard virTypedParamsGetULLong(params, nparams, name, &value) == 1 else { return nil }
         return value
     }
 
@@ -97,7 +94,7 @@ extension LibvirtConnection {
         _ params: UnsafeMutablePointer<virTypedParameter>, _ nparams: Int32
     ) -> [GuestMount] {
         var count: UInt32 = 0
-        guard virTypedParamsGetUInt(params, nparams, VIR_DOMAIN_GUEST_INFO_FS_COUNT, &count) == 0 else {
+        guard virTypedParamsGetUInt(params, nparams, VIR_DOMAIN_GUEST_INFO_FS_COUNT, &count) == 1 else {
             return []
         }
 

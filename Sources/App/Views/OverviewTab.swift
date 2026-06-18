@@ -78,6 +78,9 @@ struct OverviewTab: View {
                                 }
                             }
                         }
+                    } else if agentStatus == .connected {
+                        Text("Guest agent is connected but did not report hostname or disk usage.")
+                            .foregroundStyle(.secondary)
                     } else if agentStatus == .unavailable {
                         Text("Install and start the QEMU guest agent in the VM to see hostname, OS, and disk usage.")
                             .foregroundStyle(.secondary)
@@ -184,13 +187,8 @@ struct OverviewTab: View {
                     ifacesLoaded = true
                     return
                 }
-                if let info = try? await session.guestInfo(uuid: domain.uuid) {
-                    guestInfo = info
-                    agentStatus = info.isEmpty ? .unavailable : .connected
-                } else {
-                    guestInfo = nil
-                    agentStatus = .unavailable
-                }
+                agentStatus = (try? await session.guestAgentStatus(uuid: domain.uuid)) ?? .unavailable
+                guestInfo = try? await session.guestInfo(uuid: domain.uuid)
                 guestLoaded = true
                 ifaces = (try? await session.interfaceAddresses(uuid: domain.uuid)) ?? []
                 ifacesLoaded = true
