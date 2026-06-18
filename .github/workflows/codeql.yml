@@ -1,0 +1,73 @@
+name: CodeQL
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    - cron: "27 4 * * 1" # Mondays 04:27 UTC
+  workflow_dispatch:
+
+jobs:
+  # Swift + our first-party C (SpiceShim). The vendored C libraries are built
+  # BEFORE CodeQL starts tracing, so only our own code is analyzed — not all of
+  # gnutls/libvirt/glib/etc. under third_party.
+  compiled:
+    name: Analyze (swift, c-cpp)
+    runs-on: macos-14
+    permissions:
+      security-events: write
+      contents: read
+      actions: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Build C dependencies
+        run: make deps
+
+      - name: Select Swift 6 toolchain
+        run: |
+          XC=$(ls -d /Applications/Xcode_16*.app 2>/dev/null | sort -V | tail -1)
+          if [ -z "$XC" ]; then
+            echo "No Xcode 16.x found; available Xcodes:"; ls -d /Applications/Xcode_*.app
+            exit 1
+          fi
+          echo "Selecting $XC"
+          sudo xcode-select -s "$XC"
+          swift --version
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: c-cpp,swift
+          build-mode: manual
+
+      # `make deps` already ran above (idempotent — just stamp checks now), so the
+      # traced build compiles only the first-party SpiceShim C and the Swift code.
+      - name: Build
+        run: make build
+
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@v3
+
+  actions:
+    name: Analyze (actions)
+    runs-on: ubuntu-latest
+    permissions:
+      security-events: write
+      contents: read
+      actions: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: actions
+          build-mode: none
+
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@v3
