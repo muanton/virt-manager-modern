@@ -305,6 +305,12 @@ private struct ConsoleNSView: NSViewRepresentable {
 
     func updateNSView(_ container: NSView, context: Context) {
         if nsView.superview !== container {
+            // The console view may have been reparented into a standalone window
+            // (Detach). Don't yank it back into this container — doing so during
+            // the detach re-render orphans the view (it ends up in no window),
+            // leaving the detached console black. Only adopt the view when it has
+            // no other home.
+            if let viewWindow = nsView.window, viewWindow !== container.window { return }
             container.subviews.forEach { $0.removeFromSuperview() }
             pin(nsView, in: container)
             // Grab keyboard focus once, when first attached — not on every update

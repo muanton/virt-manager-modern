@@ -18,7 +18,11 @@ extension VNCCAFramebufferView {
             layer.contentsScale = scale
         }
         let size = bounds.size
-        if size.width >= framebufferSize.width, size.height >= framebufferSize.height {
+        let fullscreen = window?.styleMask.contains(.fullScreen) ?? false
+        if fullscreen {
+            // Fill the screen (aspect-preserved) rather than a small centered image.
+            layer.contentsGravity = .resizeAspect
+        } else if size.width >= framebufferSize.width, size.height >= framebufferSize.height {
             layer.contentsGravity = .center
         } else {
             layer.contentsGravity = .resizeAspect

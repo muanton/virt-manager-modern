@@ -52,8 +52,13 @@ public final class SpiceDisplayView: NSView {
             layer.contents = nil
             return
         }
+        // Fill the screen (aspect-preserved) in fullscreen; otherwise only ever
+        // downscale, so a windowed console stays crisp at 1:1.
         let size = bounds.size
-        if size.width >= CGFloat(fbWidth), size.height >= CGFloat(fbHeight) {
+        let fullscreen = window?.styleMask.contains(.fullScreen) ?? false
+        if fullscreen {
+            layer.contentsGravity = .resizeAspect
+        } else if size.width >= CGFloat(fbWidth), size.height >= CGFloat(fbHeight) {
             layer.contentsGravity = .center
         } else {
             layer.contentsGravity = .resizeAspect
