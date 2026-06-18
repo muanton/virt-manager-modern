@@ -179,7 +179,8 @@ if ! have openssl; then
 fi
 
 if ! have gmp; then
-    fetch "https://gmplib.org/download/gmp/gmp-$GMP_V.tar.xz"
+    # GNU mirror — gmplib.org frequently times out in CI (matches nettle below).
+    fetch "https://ftp.gnu.org/gnu/gmp/gmp-$GMP_V.tar.xz"
     ( cd "$SRC/gmp-$GMP_V" \
       && ./configure --prefix="$PREFIX" --disable-static --enable-shared >/dev/null \
       && make -j "$JOBS" >/dev/null && make install >/dev/null )
