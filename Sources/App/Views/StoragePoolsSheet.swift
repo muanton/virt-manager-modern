@@ -13,6 +13,9 @@ struct StoragePoolsSheet: View {
     @State private var createInPool: PoolRef?
     @State private var resizeVolume: StorageVolume?
     @State private var confirmWipe: StorageVolume?
+    @State private var showingUpload = false
+    @State private var transferProgress: Double?
+    @State private var transferLabel: String?
 
     private struct PoolRef: Identifiable {
         let name: String
@@ -28,8 +31,22 @@ struct StoragePoolsSheet: View {
                     Label("Refresh", systemImage: "arrow.clockwise")
                 }
                 .disabled(working)
+                Button { showingUpload = true } label: {
+                    Label("Upload ISO…", systemImage: "square.and.arrow.up")
+                }
+                .disabled(working)
             }
             .padding()
+
+            if let transferProgress {
+                VStack(alignment: .leading, spacing: 4) {
+                    ProgressView(value: transferProgress)
+                    Text(transferLabel ?? "Transferring…")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                .padding(.horizontal)
+            }
 
             if let error {
                 Label(error, systemImage: "exclamationmark.triangle.fill")
@@ -74,6 +91,11 @@ struct StoragePoolsSheet: View {
         }
         .frame(width: 560, height: 480)
         .task { await reload() }
+        .sheet(isPresented: $showingUpload) {
+            UploadISOSheet(session: session) { _ in
+                Task { await reload() }
+            }
+        }
         .sheet(item: $createInPool) { ref in
             CreateVolumeSheet(session: session, pool: ref.name) {
                 Task { await reload() }
@@ -167,6 +189,12 @@ struct StoragePoolsSheet: View {
             Spacer()
             Text(Format.bytes(vol.capacityBytes))
                 .font(.caption).foregroundStyle(.secondary).monospacedDigit()
+            Button { downloadVolume(vol) } label: {
+                Image(systemName: "arrow.down.circle")
+            }
+            .buttonStyle(.plain)
+            .help("Download to this Mac")
+            .disabled(working)
             Button { resizeVolume = vol } label: {
                 Image(systemName: "arrow.up.left.and.arrow.down.right")
             }
@@ -236,6 +264,31 @@ struct StoragePoolsSheet: View {
             defer { working = false }
             do {
                 try await session.wipeVolume(path: vol.path)
+                error = nil
+            } catch let err {
+                error = err.localizedDescription
+            }
+        }
+    }
+
+    private func downloadVolume(_ vol: StorageVolume) {
+        let panel = NSSavePanel()
+        panel.nameFieldStringValue = vol.name
+        panel.canCreateDirectories = true
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        working = true
+        transferLabel = "Downloading \(vol.name)…"
+        transferProgress = 0
+        Task {
+            defer {
+                working = false
+                transferProgress = nil
+                transferLabel = nil
+            }
+            do {
+                try await session.downloadVolume(path: vol.path, localURL: url) { p in
+                    transferProgress = p
+                }
                 error = nil
             } catch let err {
                 error = err.localizedDescription

@@ -330,6 +330,13 @@ final class ConnectionSession: ObservableObject, Identifiable {
         return path
     }
 
+    func downloadVolume(path: String, localURL: URL,
+                        progress: @escaping @MainActor (Double) -> Void) async throws {
+        try await requireConnection().downloadVolume(path: path, localURL: localURL) { p in
+            Task { @MainActor in progress(p) }
+        }
+    }
+
     func openSerialConsole(uuid: String,
                            onData: @escaping @Sendable (Data) -> Void,
                            onClose: @escaping @Sendable (String?) -> Void) async throws -> SerialConsoleHandle {

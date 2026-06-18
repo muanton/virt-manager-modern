@@ -112,7 +112,7 @@ checksum alongside the zip. Environment overrides: `CODESIGN_IDENTITY`,
 `ENTITLEMENTS`, `NOTARY_PROFILE`, or `NOTARY_API_KEY` / `NOTARY_API_KEY_ID` /
 `NOTARY_API_ISSUER_ID`. See `Scripts/sign-and-notarize.sh --help`.
 
-Release notes template: [RELEASE-v0.3.2.md](RELEASE-v0.3.2.md). Bump policy:
+Release notes template: [RELEASE-v0.4.0.md](RELEASE-v0.4.0.md). Bump policy:
 [CONTRIBUTING.md](../CONTRIBUTING.md#versioning).
 
 ### GitHub Actions release
