@@ -198,11 +198,12 @@ fi
 
 if ! have gnutls; then
     fetch "https://www.gnupg.org/ftp/gcrypt/gnutls/v${GNUTLS_V%.*}/gnutls-$GNUTLS_V.tar.xz"
-    # gnutls 3.8.13's crau.h picks the C23 `[[__maybe_unused__]]` syntax whenever the
-    # compiler advertises __has_c_attribute, without checking that [[ ]] is actually
-    # accepted in the active C mode. Newer clang (CI's macos-14) then fails with
-    # "expected ')'". Force the portable __attribute__ form instead.
-    sed -i '' 's/\[\[__maybe_unused__\]\]/__attribute__((__unused__))/g' \
+    # gnutls 3.8.13's crau.h leaves CRAU_MAYBE_UNUSED *undefined* when the compiler
+    # defines __has_c_attribute but reports __maybe_unused__ unavailable in the active
+    # C mode (CI's macos-14 clang): the __GNUC__ fallback is then unreachable and the
+    # build fails with "expected ')'". Disable the __has_c_attribute branch so the
+    # portable __attribute__((__unused__)) fallback is used.
+    sed -i '' 's/if defined(__has_c_attribute)/if 0/' \
         "$SRC/gnutls-$GNUTLS_V/lib/crau/crau.h"
     ( cd "$SRC/gnutls-$GNUTLS_V" \
       && ./configure --prefix="$PREFIX" --disable-static --enable-shared \
