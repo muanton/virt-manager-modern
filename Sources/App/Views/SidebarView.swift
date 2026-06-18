@@ -147,7 +147,10 @@ private struct SessionSection: View {
 
     @ViewBuilder private var domainRows: some View {
         ForEach(filteredDomains) { domain in
-            DomainRow(domain: domain, stats: session.stats[domain.uuid])
+            DomainRow(
+                domain: domain,
+                stats: session.stats[domain.uuid],
+                hasConfigDrift: domain.isActive && session.hasConfigDrift(uuid: domain.uuid))
                 .tag(DomainSelection(sessionID: session.id, uuid: domain.uuid))
                 .contextMenu {
                     Button("Clone \(domain.name)…") { onCloneVM(session, domain) }
@@ -201,6 +204,7 @@ private struct SessionSection: View {
 private struct DomainRow: View {
     let domain: DomainSummary
     var stats: ConnectionSession.VMStats?
+    var hasConfigDrift: Bool = false
 
     var body: some View {
         HStack(spacing: 8) {
@@ -212,23 +216,34 @@ private struct DomainRow: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .monospacedDigit()
+                    .lineLimit(2)
+            }
+            Spacer(minLength: 0)
+            if hasConfigDrift {
+                Image(systemName: "doc.badge.ellipsis")
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+                    .help("Running configuration differs from saved")
             }
         }
         .padding(.vertical, 2)
     }
 
     private var subtitle: String {
-        guard domain.isActive, let s = stats else { return domain.state.label }
+        let stateLabel = hasConfigDrift
+            ? "\(domain.state.label) · unsaved"
+            : domain.state.label
+        guard domain.isActive, let s = stats else { return stateLabel }
         if s.diskReadBps > 0 || s.diskWriteBps > 0 || s.netRxBps > 0 || s.netTxBps > 0 {
             return String(format: "%@ · %.0f%% · %@ · D↓%@ ↑%@ · N↓%@ ↑%@",
-                          domain.state.label, s.cpuPercent,
+                          stateLabel, s.cpuPercent,
                           Format.memory(kiB: s.memUsedKiB),
                           Format.rate(bytesPerSecond: s.diskReadBps),
                           Format.rate(bytesPerSecond: s.diskWriteBps),
                           Format.rate(bytesPerSecond: s.netRxBps),
                           Format.rate(bytesPerSecond: s.netTxBps))
         }
-        return String(format: "%@ · %.0f%% · %@", domain.state.label,
+        return String(format: "%@ · %.0f%% · %@", stateLabel,
                       s.cpuPercent, Format.memory(kiB: s.memUsedKiB))
     }
 }
