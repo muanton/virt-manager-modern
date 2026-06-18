@@ -15,6 +15,20 @@ jobs:
       - name: Build C dependencies
         run: make deps
 
+      # The package needs the Swift 6 toolchain; macos-14 defaults to Xcode 15
+      # (Swift 5.10). Select Xcode 16 here — after the C deps build so that keeps
+      # using the runner default toolchain it already builds cleanly with.
+      - name: Select Swift 6 toolchain
+        run: |
+          XC=$(ls -d /Applications/Xcode_16*.app 2>/dev/null | sort -V | tail -1)
+          if [ -z "$XC" ]; then
+            echo "No Xcode 16.x found; available Xcodes:"; ls -d /Applications/Xcode_*.app
+            exit 1
+          fi
+          echo "Selecting $XC"
+          sudo xcode-select -s "$XC"
+          swift --version
+
       - name: Run tests
         run: swift test
 
