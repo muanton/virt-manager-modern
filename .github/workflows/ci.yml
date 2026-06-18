@@ -29,8 +29,11 @@ jobs:
           sudo xcode-select -s "$XC"
           swift --version
 
+      # Use `make test`, not bare `swift test`: the Makefile exports
+      # PKG_CONFIG_PATH=third_party/prefix/lib/pkgconfig, which SpiceShim's
+      # pkgConfig("spice-client-glib-2.0") needs to find <spice-client.h>.
       - name: Run tests
-        run: swift test
+        run: make test
 
       - name: Build app
         run: make build
