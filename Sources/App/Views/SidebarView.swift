@@ -234,10 +234,8 @@ private struct DomainRow: View {
         if domain.isActive, let s = stats {
             VStack(alignment: .leading, spacing: 1) {
                 Text("\(stateLabel) · CPU \(Int(s.cpuPercent))% · RAM \(Format.memory(kiB: s.memUsedKiB))")
-                if s.diskReadBps > 0 || s.diskWriteBps > 0 || s.netRxBps > 0 || s.netTxBps > 0 {
-                    Text("Disk read \(Format.rate(bytesPerSecond: s.diskReadBps)) · write \(Format.rate(bytesPerSecond: s.diskWriteBps))")
-                    Text("Net in \(Format.rate(bytesPerSecond: s.netRxBps)) · out \(Format.rate(bytesPerSecond: s.netTxBps))")
-                }
+                Text("Disk read \(Format.rate(bytesPerSecond: s.diskReadBps)) · write \(Format.rate(bytesPerSecond: s.diskWriteBps))")
+                Text("Net in \(Format.rate(bytesPerSecond: s.netRxBps)) · out \(Format.rate(bytesPerSecond: s.netTxBps))")
             }
             .font(.caption)
             .foregroundStyle(.secondary)

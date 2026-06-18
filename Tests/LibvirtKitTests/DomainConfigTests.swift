@@ -465,6 +465,82 @@ extension DomainConfigTests {
         XCTAssertTrue(changes.contains { $0.label == "Device" && $0.liveValue.contains("NIC") })
     }
 
+    func testDeviceXMLBySignatureKeysMatchDiffSignatures() throws {
+        let c = try DomainConfig(xml: sample)
+        XCTAssertEqual(c.deviceDiffSignatures(), Set(c.deviceXMLBySignature().keys))
+    }
+
+    func testDeviceXMLBySignatureProvidesRevertFragments() throws {
+        let saved = """
+        <domain type='kvm'>
+          <name>vm</name><vcpu>2</vcpu>
+          <devices>
+            <disk type='file' device='disk'>
+              <source file='/v/a.qcow2'/><target dev='vda' bus='virtio'/>
+            </disk>
+          </devices>
+        </domain>
+        """
+        let live = """
+        <domain type='kvm'>
+          <name>vm</name><vcpu>4</vcpu>
+          <devices>
+            <disk type='file' device='disk'>
+              <source file='/v/a.qcow2'/><target dev='vda' bus='virtio'/>
+            </disk>
+            <interface type='network'>
+              <source network='default'/><model type='virtio'/>
+            </interface>
+          </devices>
+        </domain>
+        """
+        let liveCfg = try DomainConfig(xml: live)
+        let savedCfg = try DomainConfig(xml: saved)
+        let liveMap = liveCfg.deviceXMLBySignature()
+        let savedMap = savedCfg.deviceXMLBySignature()
+
+        let detachSigs = Set(liveMap.keys).subtracting(savedMap.keys).sorted()
+        XCTAssertEqual(detachSigs.count, 1)
+        XCTAssertTrue(detachSigs[0].contains("NIC"))
+        let detachXML = try XCTUnwrap(liveMap[detachSigs[0]])
+        XCTAssertTrue(detachXML.contains("<interface"))
+        XCTAssertTrue(detachXML.contains("default"))
+
+        let attachSigs = Set(savedMap.keys).subtracting(liveMap.keys).sorted()
+        XCTAssertTrue(attachSigs.isEmpty)
+
+        let savedOnly = """
+        <domain type='kvm'>
+          <name>vm</name><vcpu>2</vcpu>
+          <devices>
+            <disk type='file' device='disk'>
+              <source file='/v/a.qcow2'/><target dev='vda' bus='virtio'/>
+            </disk>
+            <interface type='network'>
+              <source network='default'/><model type='virtio'/>
+            </interface>
+          </devices>
+        </domain>
+        """
+        let liveOnlyDisk = """
+        <domain type='kvm'>
+          <name>vm</name><vcpu>2</vcpu>
+          <devices>
+            <disk type='file' device='disk'>
+              <source file='/v/a.qcow2'/><target dev='vda' bus='virtio'/>
+            </disk>
+          </devices>
+        </domain>
+        """
+        let savedMap2 = try DomainConfig(xml: savedOnly).deviceXMLBySignature()
+        let liveMap2 = try DomainConfig(xml: liveOnlyDisk).deviceXMLBySignature()
+        let attachSigs2 = Set(savedMap2.keys).subtracting(liveMap2.keys).sorted()
+        XCTAssertEqual(attachSigs2.count, 1)
+        XCTAssertTrue(attachSigs2[0].contains("NIC"))
+        let attachXML = try XCTUnwrap(savedMap2[attachSigs2[0]])
+        XCTAssertTrue(attachXML.contains("<interface"))
+    }
+
     func testGuestOSCatalogIncludesCurrentReleases() {
         let ids = Set(GuestOS.catalog.map(\.id))
         XCTAssertTrue(ids.contains("ubuntu26.04"))
