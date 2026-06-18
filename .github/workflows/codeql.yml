@@ -44,10 +44,17 @@ jobs:
           languages: c-cpp,swift
           build-mode: manual
 
-      # `make deps` already ran above (idempotent — just stamp checks now), so the
-      # traced build compiles only the first-party SpiceShim C and the Swift code.
-      - name: Build
-        run: make build
+      # Traced build — `make deps` already ran above (idempotent), so this compiles
+      # only the first-party SpiceShim C and the Swift code. Self-contained (not
+      # `make build`) to stay independent of the Makefile:
+      #  - --arch arm64: CodeQL's extractor runs the build under Rosetta, so the
+      #    default host arch flips to x86_64 and linking the arm64 C deps fails.
+      #  - debug (no -c release): CodeQL only traces compilation, so skip optimizing.
+      #  - PKG_CONFIG_PATH: same three dirs the Makefile uses, so deps resolve.
+      - name: Build (traced by CodeQL)
+        env:
+          PKG_CONFIG_PATH: ${{ github.workspace }}/third_party/prefix/lib/pkgconfig:${{ github.workspace }}/third_party/prefix/share/pkgconfig:${{ github.workspace }}/third_party/sdk-pc
+        run: swift build --arch arm64
 
       - name: Perform CodeQL Analysis
         uses: github/codeql-action/analyze@v3
