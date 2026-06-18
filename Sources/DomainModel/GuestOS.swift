@@ -47,32 +47,37 @@ public struct GuestOS: Identifiable, Hashable, Sendable {
     }
 
     /// Recommended resources follow osinfo-db; ordering is newest-first per family.
+    /// Refreshed for mid-2026 shipping releases (Ubuntu 26.04, Fedora 44, RHEL 10, …).
     public static let catalog: [GuestOS] = [
         // Linux
         .init("linux-generic", "Generic Linux", .linux, mem: 2048, cpus: 2, disk: 20),
+        .init("ubuntu26.04", "Ubuntu 26.04 LTS", .linux, mem: 4096, cpus: 2, disk: 25),
         .init("ubuntu24.04", "Ubuntu 24.04 LTS", .linux, mem: 4096, cpus: 2, disk: 25),
         .init("ubuntu22.04", "Ubuntu 22.04 LTS", .linux, mem: 4096, cpus: 2, disk: 25),
         .init("debian13", "Debian 13 (Trixie)", .linux, mem: 2048, cpus: 2, disk: 20),
         .init("debian12", "Debian 12 (Bookworm)", .linux, mem: 2048, cpus: 2, disk: 20),
-        .init("fedora42", "Fedora 42", .linux, mem: 4096, cpus: 2, disk: 20),
+        .init("fedora44", "Fedora 44", .linux, mem: 4096, cpus: 2, disk: 20),
+        .init("fedora43", "Fedora 43", .linux, mem: 4096, cpus: 2, disk: 20),
+        .init("rhel10", "RHEL / Alma / Rocky 10", .linux, mem: 4096, cpus: 2, disk: 20),
         .init("rhel9", "RHEL / Alma / Rocky 9", .linux, mem: 4096, cpus: 2, disk: 20),
-        .init("opensuse", "openSUSE Leap", .linux, mem: 4096, cpus: 2, disk: 20),
+        .init("opensuse16", "openSUSE Leap 16", .linux, mem: 4096, cpus: 2, disk: 20),
         .init("archlinux", "Arch Linux", .linux, mem: 2048, cpus: 2, disk: 20),
-        .init("alpine", "Alpine Linux", .linux, mem: 512, cpus: 1, disk: 8),
+        .init("alpine323", "Alpine Linux 3.23", .linux, mem: 512, cpus: 1, disk: 8),
 
         // Windows
         .init("win11", "Windows 11", .windows, mem: 8192, cpus: 4, disk: 64,
               hyperv: true, tpm: true, uefi: true),
-        .init("win10", "Windows 10", .windows, mem: 4096, cpus: 2, disk: 64,
-              hyperv: true),
         .init("win2k25", "Windows Server 2025", .windows, mem: 4096, cpus: 4, disk: 64,
               hyperv: true, uefi: true),
+        .init("win10", "Windows 10 (legacy)", .windows, mem: 4096, cpus: 2, disk: 64,
+              hyperv: true),
         .init("win2k22", "Windows Server 2022", .windows, mem: 4096, cpus: 4, disk: 64,
               hyperv: true),
 
         // BSD
+        .init("freebsd151", "FreeBSD 15.1", .bsd, mem: 1024, cpus: 1, disk: 16),
         .init("freebsd14", "FreeBSD 14", .bsd, mem: 1024, cpus: 1, disk: 16),
-        .init("openbsd7", "OpenBSD 7", .bsd, mem: 1024, cpus: 1, disk: 16),
+        .init("openbsd77", "OpenBSD 7.7", .bsd, mem: 1024, cpus: 1, disk: 16),
 
         // Generic fallback
         .init("generic", "Unknown / Other OS", .generic, mem: 2048, cpus: 2, disk: 20),

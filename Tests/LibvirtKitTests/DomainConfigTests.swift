@@ -431,4 +431,14 @@ extension DomainConfigTests {
         // The original document is untouched.
         XCTAssertTrue(cfg.xmlString().contains("<name>orig</name>"))
     }
+
+    func testGuestOSCatalogIncludesCurrentReleases() {
+        let ids = Set(GuestOS.catalog.map(\.id))
+        XCTAssertTrue(ids.contains("ubuntu26.04"))
+        XCTAssertTrue(ids.contains("fedora44"))
+        XCTAssertTrue(ids.contains("rhel10"))
+        XCTAssertTrue(ids.contains("opensuse16"))
+        XCTAssertTrue(ids.contains("freebsd151"))
+        XCTAssertFalse(ids.contains("fedora42"), "retired profiles should be removed")
+    }
 }
