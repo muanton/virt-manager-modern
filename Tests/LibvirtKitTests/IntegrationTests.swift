@@ -127,6 +127,8 @@ final class IntegrationTests: XCTestCase {
             // Counters exist even when zero; fields must be readable.
             _ = s.blockReadBytes
             _ = s.blockWriteBytes
+            _ = s.netRxBytes
+            _ = s.netTxBytes
         }
     }
 

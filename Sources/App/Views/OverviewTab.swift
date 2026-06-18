@@ -34,6 +34,13 @@ struct OverviewTab: View {
                     }
                 }
                 LabeledContent("Domain ID", value: domain.domainID >= 0 ? "\(domain.domainID)" : "—")
+                if session.hasConfigDrift(uuid: domain.uuid) {
+                    LabeledContent("Configuration") {
+                        Label("Running differs from saved", systemImage: "exclamationmark.triangle.fill")
+                            .foregroundStyle(.orange)
+                            .help("Live changes may be lost on reboot. Open the Hardware tab to review or sync.")
+                    }
+                }
                 if domain.isActive {
                     LabeledContent("QEMU guest agent") {
                         HStack(spacing: 6) {
@@ -106,6 +113,10 @@ struct OverviewTab: View {
                     }
                     LabeledContent("Disk I/O") {
                         Text("↓ \(Format.rate(bytesPerSecond: s.diskReadBps)) · ↑ \(Format.rate(bytesPerSecond: s.diskWriteBps))")
+                            .monospacedDigit()
+                    }
+                    LabeledContent("Network I/O") {
+                        Text("↓ \(Format.rate(bytesPerSecond: s.netRxBps)) · ↑ \(Format.rate(bytesPerSecond: s.netTxBps))")
                             .monospacedDigit()
                     }
                 }

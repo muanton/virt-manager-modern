@@ -3,6 +3,7 @@
 #include <spice-client.h>
 #include <channel-main.h>
 #include <spice-audio.h>
+#include <usb-device-manager.h>
 #include <spice/vd_agent.h>
 #include <glib.h>
 #include <stdio.h>
@@ -32,6 +33,7 @@ struct VMMSpiceSession {
     guint clipboard_release_src;
 
     int audio_enabled;
+    int usb_enabled;
 };
 
 /* ---- Shared GLib runner ------------------------------------------------- *
@@ -264,6 +266,8 @@ static void on_channel_new(SpiceSession *session, SpiceChannel *channel,
         spice_channel_connect(channel);
     } else if (type == SPICE_CHANNEL_PLAYBACK || type == SPICE_CHANNEL_RECORD) {
         SHIMLOG("channel-new audio type=%d (handled by SpiceAudio)", type);
+    } else if (type == SPICE_CHANNEL_USBREDIR) {
+        SHIMLOG("channel-new usbredir (handled by SpiceUsbDeviceManager)");
     }
 }
 
@@ -277,6 +281,27 @@ static void on_channel_destroy(SpiceSession *session, SpiceChannel *channel,
 }
 
 /* ---- lifecycle (all session work happens on the runner thread) ---- */
+
+static void apply_usb(VMMSpiceSession *s) {
+    if (!s->session)
+        return;
+    g_object_set(s->session, "enable-usbredir", s->usb_enabled ? TRUE : FALSE, NULL);
+    if (s->usb_enabled) {
+        GError *err = NULL;
+        SpiceUsbDeviceManager *usb = spice_usb_device_manager_get(s->session, &err);
+        if (err) {
+            SHIMLOG("USB redirection unavailable: %s", err->message);
+            g_clear_error(&err);
+        } else if (usb) {
+            SHIMLOG("USB redirection enabled");
+        }
+    }
+}
+
+static gboolean usb_enable_cb(gpointer data) {
+    apply_usb((VMMSpiceSession *)data);
+    return G_SOURCE_REMOVE;
+}
 
 static void apply_audio(VMMSpiceSession *s) {
     if (!s->session)
@@ -308,9 +333,11 @@ static gboolean start_cb(gpointer data) {
     g_signal_connect(s->session, "channel-destroy", G_CALLBACK(on_channel_destroy), s);
 
     apply_audio(s);
+    apply_usb(s);
 
-    SHIMLOG("connecting to %s:%d (password=%s audio=%s)", s->host, s->port,
-            s->password ? "yes" : "no", s->audio_enabled ? "on" : "off");
+    SHIMLOG("connecting to %s:%d (password=%s audio=%s usb=%s)", s->host, s->port,
+            s->password ? "yes" : "no", s->audio_enabled ? "on" : "off",
+            s->usb_enabled ? "on" : "off");
     spice_session_connect(s->session);
     return G_SOURCE_REMOVE;
 }
@@ -468,6 +495,14 @@ void vmm_spice_clipboard_host_grab(VMMSpiceSession *s) {
     g_main_context_invoke(g_runner_ctx, host_grab_cb, s);
 }
 
+void vmm_spice_usb_enable(VMMSpiceSession *s, int enabled) {
+    if (!s)
+        return;
+    s->usb_enabled = enabled ? 1 : 0;
+    if (s->started && g_runner_ctx)
+        g_main_context_invoke(g_runner_ctx, usb_enable_cb, s);
+}
+
 void vmm_spice_audio_enable(VMMSpiceSession *s, int enabled) {
     if (!s)
         return;
@@ -488,9 +523,14 @@ void vmm_spice_clipboard_host_notify(VMMSpiceSession *s, uint32_t type,
     g_main_context_invoke(g_runner_ctx, host_notify_cb, op);
 }
 
+#define VMM_SPICE_VER_STR2(x) #x
+#define VMM_SPICE_VER_STR(x) VMM_SPICE_VER_STR2(x)
+
 const char *vmm_spice_version(void) {
     static char buf[64];
-    snprintf(buf, sizeof(buf), "spice-gtk %d.%d",
-             SPICE_GTK_MAJOR_VERSION, SPICE_GTK_MINOR_VERSION);
+    /* Stringify macros so git-dirty version tags like (42-dirty) still compile. */
+    snprintf(buf, sizeof(buf), "spice-gtk %s.%s",
+             VMM_SPICE_VER_STR(SPICE_GTK_MAJOR_VERSION),
+             VMM_SPICE_VER_STR(SPICE_GTK_MINOR_VERSION));
     return buf;
 }

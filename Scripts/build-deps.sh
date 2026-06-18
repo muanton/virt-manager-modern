@@ -38,6 +38,8 @@ JSONGLIB_V=1.10.8
 GST_V=1.28.3
 SPICEPROTO_V=0.14.5
 SPICEGTK_V=0.42
+LIBUSB_V=1.0.28
+USBREDIR_V=0.13.0
 LIBVIRT_V=12.4.0
 
 # ---- isolated build environment (never look at /opt/homebrew or /usr/local) -
@@ -263,6 +265,24 @@ if ! have spice-protocol; then
     done_ spice-protocol
 fi
 
+if ! have libusb; then
+    fetch "https://github.com/libusb/libusb/releases/download/v$LIBUSB_V/libusb-$LIBUSB_V.tar.bz2"
+    ( cd "$SRC/libusb-$LIBUSB_V" \
+      && ./configure --prefix="$PREFIX" --disable-static --enable-shared >/dev/null \
+      && make -j "$JOBS" >/dev/null && make install >/dev/null )
+    done_ libusb
+fi
+
+if ! have usbredir; then
+    # spice-gtk was previously built without usbredir — rebuild it once deps exist.
+    rm -f "$STAMPS/spice-gtk"
+    fetch "https://gitlab.freedesktop.org/spice/usbredir/-/archive/usbredir-$USBREDIR_V/usbredir-$USBREDIR_V.tar.bz2"
+    usbdir=( $SRC/usbredir-usbredir-$USBREDIR_V*(N) )
+    [[ ${#usbdir[@]} -eq 1 ]] || { log "usbredir extract dir not found"; exit 1; }
+    meson_build "$usbdir[1]" -Dtests=disabled -Dfuzzing=disabled
+    done_ usbredir
+fi
+
 if ! have spice-gtk; then
     fetch "https://www.spice-space.org/download/gtk/spice-gtk-$SPICEGTK_V.tar.xz"
     # Upstream fix (post-0.42) for libtool-style '-export-symbols' the Apple
@@ -271,7 +291,7 @@ if ! have spice-gtk; then
         "https://gitlab.freedesktop.org/spice/spice-gtk/-/commit/1511f0ad5ea67b4657540c631e3a8c959bb8d578.diff"
     ( cd "$SRC/spice-gtk-$SPICEGTK_V" && patch -p1 -N < "$SRC/spice-gtk-symfix.diff" ) || true
     meson_build "$SRC/spice-gtk-$SPICEGTK_V" \
-        -Dgtk=disabled -Dwebdav=disabled -Dusbredir=disabled -Dlz4=disabled \
+        -Dgtk=disabled -Dwebdav=disabled -Dusbredir=enabled -Dlz4=disabled \
         -Dsasl=disabled -Dopus=disabled -Dsmartcard=disabled -Dpolkit=disabled \
         -Dintrospection=disabled -Dvapi=disabled -Dgtk_doc=disabled
     done_ spice-gtk

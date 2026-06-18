@@ -219,12 +219,14 @@ private struct DomainRow: View {
 
     private var subtitle: String {
         guard domain.isActive, let s = stats else { return domain.state.label }
-        if s.diskReadBps > 0 || s.diskWriteBps > 0 {
-            return String(format: "%@ · %.0f%% · %@ · ↓%@ ↑%@",
+        if s.diskReadBps > 0 || s.diskWriteBps > 0 || s.netRxBps > 0 || s.netTxBps > 0 {
+            return String(format: "%@ · %.0f%% · %@ · D↓%@ ↑%@ · N↓%@ ↑%@",
                           domain.state.label, s.cpuPercent,
                           Format.memory(kiB: s.memUsedKiB),
                           Format.rate(bytesPerSecond: s.diskReadBps),
-                          Format.rate(bytesPerSecond: s.diskWriteBps))
+                          Format.rate(bytesPerSecond: s.diskWriteBps),
+                          Format.rate(bytesPerSecond: s.netRxBps),
+                          Format.rate(bytesPerSecond: s.netTxBps))
         }
         return String(format: "%@ · %.0f%% · %@", domain.state.label,
                       s.cpuPercent, Format.memory(kiB: s.memUsedKiB))

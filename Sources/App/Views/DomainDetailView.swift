@@ -175,10 +175,14 @@ struct DomainDetailView: View {
     }
 
     private func subtitle(for domain: DomainSummary) -> String {
-        if !domain.isActive, hasManagedSave {
-            return "\(domain.state.label) · saved state on disk"
+        var parts = [domain.state.label]
+        if domain.isActive, session.hasConfigDrift(uuid: domain.uuid) {
+            parts.append("config drift")
         }
-        return domain.state.label
+        if !domain.isActive, hasManagedSave {
+            parts.append("saved state on disk")
+        }
+        return parts.joined(separator: " · ")
     }
 
     private func refreshManagedSave() async {

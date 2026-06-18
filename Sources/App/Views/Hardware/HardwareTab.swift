@@ -40,6 +40,9 @@ struct HardwareTab: View {
             }
         }
         .task(id: uuid) { if !model.isLoaded { await model.load() } }
+        .onChange(of: session.configDrift[uuid]) { _, _ in
+            Task { await model.refreshConfigSyncState() }
+        }
         .safeAreaInset(edge: .bottom) {
             if model.dirty || model.applyMessage != nil { applyBar }
         }

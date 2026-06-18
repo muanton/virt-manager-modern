@@ -78,6 +78,17 @@ final class HardwareModel: ObservableObject {
             persistentXML = nil
             return
         }
+        if session.hasConfigDrift(uuid: uuid) {
+            await loadConfigDiffDetails()
+            return
+        }
+        liveDiffersFromSaved = false
+        configChanges = []
+        liveXML = nil
+        persistentXML = nil
+    }
+
+    private func loadConfigDiffDetails() async {
         do {
             let updated = try await session.domainIsUpdated(uuid: uuid)
             liveDiffersFromSaved = updated
@@ -93,7 +104,7 @@ final class HardwareModel: ObservableObject {
             persistentXML = saved
             configChanges = try DomainConfigDiff.changes(liveXML: live, savedXML: saved)
         } catch {
-            liveDiffersFromSaved = false
+            liveDiffersFromSaved = session.hasConfigDrift(uuid: uuid)
             configChanges = []
             liveXML = nil
             persistentXML = nil
@@ -107,6 +118,7 @@ final class HardwareModel: ObservableObject {
         defer { applying = false }
         do {
             _ = try await session.defineXML(liveXML)
+            session.clearConfigDrift(uuid: uuid)
             applyMessage = "Saved configuration updated from the running VM."
             await refreshConfigSyncState()
             await load()

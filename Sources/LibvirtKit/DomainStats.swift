@@ -9,6 +9,8 @@ public struct DomainStats: Sendable {
     public let vcpuCount: Int
     public let blockReadBytes: UInt64       // cumulative read bytes (all disks)
     public let blockWriteBytes: UInt64      // cumulative write bytes (all disks)
+    public let netRxBytes: UInt64           // cumulative NIC receive bytes
+    public let netTxBytes: UInt64           // cumulative NIC transmit bytes
 }
 
 /// Whether the QEMU guest agent is reachable for a running VM.
@@ -50,7 +52,8 @@ extension LibvirtConnection {
             let want = UInt32(VIR_DOMAIN_STATS_CPU_TOTAL.rawValue
                             | VIR_DOMAIN_STATS_BALLOON.rawValue
                             | VIR_DOMAIN_STATS_VCPU.rawValue
-                            | VIR_DOMAIN_STATS_BLOCK.rawValue)
+                            | VIR_DOMAIN_STATS_BLOCK.rawValue
+                            | VIR_DOMAIN_STATS_INTERFACE.rawValue)
             let n = virConnectGetAllDomainStats(conn, want, &records, 0)
             guard n >= 0, let records else {
                 throw LibvirtError.lastError(fallback: "Failed to fetch domain stats")
@@ -66,6 +69,7 @@ extension LibvirtConnection {
 
                 var cpuTime: UInt64 = 0, current: UInt64 = 0, rss: UInt64 = 0, vcpus = 0
                 var rdBytes: UInt64 = 0, wrBytes: UInt64 = 0
+                var rxBytes: UInt64 = 0, txBytes: UInt64 = 0
                 for j in 0..<Int(rec.pointee.nparams) {
                     let p = rec.pointee.params[j]
                     let name = Self.paramName(p)
@@ -79,12 +83,17 @@ extension LibvirtConnection {
                             rdBytes &+= Self.paramUInt64(p) ?? 0
                         } else if name.hasPrefix("block."), name.hasSuffix(".wr.bytes") {
                             wrBytes &+= Self.paramUInt64(p) ?? 0
+                        } else if name.hasPrefix("net."), name.hasSuffix(".rx.bytes") {
+                            rxBytes &+= Self.paramUInt64(p) ?? 0
+                        } else if name.hasPrefix("net."), name.hasSuffix(".tx.bytes") {
+                            txBytes &+= Self.paramUInt64(p) ?? 0
                         }
                     }
                 }
                 out[uuid] = DomainStats(cpuTimeNs: cpuTime, balloonCurrentKiB: current,
                                         balloonRSSKiB: rss, vcpuCount: vcpus,
-                                        blockReadBytes: rdBytes, blockWriteBytes: wrBytes)
+                                        blockReadBytes: rdBytes, blockWriteBytes: wrBytes,
+                                        netRxBytes: rxBytes, netTxBytes: txBytes)
             }
             return out
         }

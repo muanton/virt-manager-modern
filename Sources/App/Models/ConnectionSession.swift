@@ -20,6 +20,7 @@ final class ConnectionSession: ObservableObject, Identifiable {
     @Published private(set) var status: Status = .disconnected
     @Published private(set) var domains: [DomainSummary] = []
     @Published private(set) var stats: [String: VMStats] = [:]
+    @Published private(set) var configDrift: [String: Bool] = [:]
     @Published private(set) var pools: [StoragePoolInfo] = []
 
     struct VMStats {
@@ -28,9 +29,12 @@ final class ConnectionSession: ObservableObject, Identifiable {
         var memTotalKiB: UInt64
         var diskReadBps: UInt64
         var diskWriteBps: UInt64
+        var netRxBps: UInt64
+        var netTxBps: UInt64
     }
     private var lastCPUSamples: [String: (timeNs: UInt64, at: Date)] = [:]
     private var lastBlockSamples: [String: (readBytes: UInt64, writeBytes: UInt64, at: Date)] = [:]
+    private var lastNetSamples: [String: (rxBytes: UInt64, txBytes: UInt64, at: Date)] = [:]
 
     @Published private(set) var networks: [VirtNetwork] = []
     @Published private(set) var volumes: [StorageVolume] = []
@@ -109,8 +113,10 @@ final class ConnectionSession: ObservableObject, Identifiable {
             if let uuid = summary?.uuid {
                 domains.removeAll { $0.uuid == uuid }
                 stats.removeValue(forKey: uuid)
+                configDrift.removeValue(forKey: uuid)
                 lastCPUSamples.removeValue(forKey: uuid)
                 lastBlockSamples.removeValue(forKey: uuid)
+                lastNetSamples.removeValue(forKey: uuid)
             } else {
                 Task { await refreshDomainList() }
             }
@@ -122,7 +128,10 @@ final class ConnectionSession: ObservableObject, Identifiable {
         default:
             if let s = summary { upsertDomain(s) }
             else { Task { await refreshDomainList() } }
-            Task { await refreshStats() }
+            Task {
+                await refreshStats()
+                await refreshConfigDrift()
+            }
         }
     }
 
@@ -145,8 +154,10 @@ final class ConnectionSession: ObservableObject, Identifiable {
         dead.close()
         conn = nil
         stats = [:]
+        configDrift = [:]
         lastCPUSamples = [:]
         lastBlockSamples = [:]
+        lastNetSamples = [:]
         status = .reconnecting
     }
 
@@ -252,15 +263,52 @@ final class ConnectionSession: ObservableObject, Identifiable {
             }
             lastBlockSamples[uuid] = (s.blockReadBytes, s.blockWriteBytes, now)
 
+            var rxBps: UInt64 = 0, txBps: UInt64 = 0
+            if let prev = lastNetSamples[uuid],
+               s.netRxBytes >= prev.rxBytes, s.netTxBytes >= prev.txBytes {
+                let elapsed = now.timeIntervalSince(prev.at)
+                if elapsed > 0.2 {
+                    rxBps = UInt64(Double(s.netRxBytes - prev.rxBytes) / elapsed)
+                    txBps = UInt64(Double(s.netTxBytes - prev.txBytes) / elapsed)
+                } else {
+                    rxBps = stats[uuid]?.netRxBps ?? 0
+                    txBps = stats[uuid]?.netTxBps ?? 0
+                }
+            }
+            lastNetSamples[uuid] = (s.netRxBytes, s.netTxBytes, now)
+
             next[uuid] = VMStats(cpuPercent: cpu,
                                  memUsedKiB: s.balloonRSSKiB,
                                  memTotalKiB: s.balloonCurrentKiB,
                                  diskReadBps: readBps,
-                                 diskWriteBps: writeBps)
+                                 diskWriteBps: writeBps,
+                                 netRxBps: rxBps,
+                                 netTxBps: txBps)
         }
         stats = next
         lastCPUSamples = lastCPUSamples.filter { next[$0.key] != nil }
         lastBlockSamples = lastBlockSamples.filter { next[$0.key] != nil }
+        lastNetSamples = lastNetSamples.filter { next[$0.key] != nil }
+        await refreshConfigDrift()
+    }
+
+    func hasConfigDrift(uuid: String) -> Bool {
+        configDrift[uuid] == true
+    }
+
+    func clearConfigDrift(uuid: String) {
+        configDrift[uuid] = false
+    }
+
+    private func refreshConfigDrift() async {
+        guard let conn else { return }
+        var next: [String: Bool] = [:]
+        for domain in domains where domain.isActive {
+            if let updated = try? await conn.domainIsUpdated(uuid: domain.uuid) {
+                next[domain.uuid] = updated
+            }
+        }
+        configDrift = next
     }
 
     private func startPolling() {

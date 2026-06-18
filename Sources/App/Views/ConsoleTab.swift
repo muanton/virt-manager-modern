@@ -286,7 +286,8 @@ struct ConsoleTab: View {
         case .spice:
             await spice.start(target,
                               clipboardEnabled: preferences.spiceClipboardEnabled,
-                              audioEnabled: preferences.spiceAudioEnabled)
+                              audioEnabled: preferences.spiceAudioEnabled,
+                              usbEnabled: preferences.spiceUsbEnabled)
         default:     break
         }
     }

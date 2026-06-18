@@ -61,6 +61,9 @@ void vmm_spice_clipboard_host_notify(VMMSpiceSession *s, uint32_t type,
 /* Guest audio (playback + microphone via spice-gtk / GStreamer). */
 void vmm_spice_audio_enable(VMMSpiceSession *s, int enabled);
 
+/* USB device redirection (requires usbredir-enabled spice-gtk build). */
+void vmm_spice_usb_enable(VMMSpiceSession *s, int enabled);
+
 const char *vmm_spice_version(void);
 
 #ifdef __cplusplus
