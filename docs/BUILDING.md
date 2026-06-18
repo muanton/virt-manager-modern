@@ -115,6 +115,38 @@ checksum alongside the zip. Environment overrides: `CODESIGN_IDENTITY`,
 Release notes template: [RELEASE-v0.3.1.md](RELEASE-v0.3.1.md). Bump policy:
 [CONTRIBUTING.md](../CONTRIBUTING.md#versioning).
 
+### GitHub Actions release
+
+`.github/workflows/release.yml` runs on tag push (`v*`) or manual **workflow_dispatch**.
+It builds, tests, signs, notarizes, and publishes the zip + SHA256 to GitHub Releases.
+The git tag must match `VERSION` (e.g. tag `v0.3.1` when `VERSION` is `0.3.1`).
+
+Configure these repository secrets (**Settings → Secrets and variables → Actions**):
+
+| Secret | Value |
+|---|---|
+| `BUILD_CERTIFICATE_BASE64` | Base64-encoded Developer ID Application `.p12` export |
+| `P12_PASSWORD` | Password used when exporting the `.p12` |
+| `NOTARY_API_ISSUER_ID` | App Store Connect API issuer ID |
+| `NOTARY_API_KEY_ID` | API key ID |
+| `NOTARY_API_PRIVATE_KEY` | Full contents of the `.p8` API key file |
+| `KEYCHAIN_PASSWORD` | *(optional)* temp keychain password; random if omitted |
+
+Export the certificate:
+
+```sh
+# Keychain Access → Developer ID Application → Export → .p12
+base64 -i Certificates.p12 | pbcopy   # paste into BUILD_CERTIFICATE_BASE64
+```
+
+Publish:
+
+```sh
+# After VERSION bump + docs/RELEASE-v<version>.md exist on main:
+git tag v0.3.1 && git push origin v0.3.1
+# Or: Actions → Release → Run workflow → tag v0.3.1
+```
+
 ## App icon
 
 `Resources/AppIcon.icns` is generated — `Scripts/make-icon.swift` draws the

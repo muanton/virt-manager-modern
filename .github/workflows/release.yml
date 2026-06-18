@@ -1,0 +1,123 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Git tag to release (e.g. v0.3.1 — must match VERSION)'
+        required: true
+        type: string
+
+# Upload release assets and publish the GitHub Release.
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build, sign, notarize, and publish
+    runs-on: macos-14
+    env:
+      RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref }}
+
+      - name: Verify tag matches VERSION
+        run: |
+          TAG="${RELEASE_TAG#v}"
+          VERSION="$(cat VERSION)"
+          if [[ "$TAG" != "$VERSION" ]]; then
+            echo "Tag v$TAG does not match VERSION file ($VERSION)." >&2
+            echo "Bump VERSION and commit before tagging." >&2
+            exit 1
+          fi
+
+      - name: Build C dependencies
+        run: make deps
+
+      - name: Select Swift 6 toolchain
+        run: |
+          XC=$(ls -d /Applications/Xcode_16*.app 2>/dev/null | sort -V | tail -1)
+          if [ -z "$XC" ]; then
+            echo "No Xcode 16.x found; available Xcodes:"; ls -d /Applications/Xcode_*.app
+            exit 1
+          fi
+          echo "Selecting $XC"
+          sudo xcode-select -s "$XC"
+          swift --version
+
+      - name: Run tests
+        run: make test
+
+      - name: Import code-signing certificate
+        env:
+          BUILD_CERTIFICATE_BASE64: ${{ secrets.BUILD_CERTIFICATE_BASE64 }}
+          P12_PASSWORD: ${{ secrets.P12_PASSWORD }}
+          KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
+        run: |
+          if [[ -z "$BUILD_CERTIFICATE_BASE64" || -z "$P12_PASSWORD" ]]; then
+            echo "Missing secrets: BUILD_CERTIFICATE_BASE64 and P12_PASSWORD are required." >&2
+            echo "See docs/BUILDING.md § GitHub Actions release." >&2
+            exit 1
+          fi
+          KC_PASS="${KEYCHAIN_PASSWORD:-$(openssl rand -base64 32)}"
+          CERT_PATH="$RUNNER_TEMP/build_certificate.p12"
+          KC_PATH="$RUNNER_TEMP/app-signing.keychain-db"
+          echo -n "$BUILD_CERTIFICATE_BASE64" | base64 --decode -o "$CERT_PATH"
+          security create-keychain -p "$KC_PASS" "$KC_PATH"
+          security set-keychain-settings -lut 21600 "$KC_PATH"
+          security unlock-keychain -p "$KC_PASS" "$KC_PATH"
+          security import "$CERT_PATH" -P "$P12_PASSWORD" -A -t cert -f pkcs12 -k "$KC_PATH"
+          security list-keychain -d user -s "$KC_PATH"
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KC_PASS" "$KC_PATH"
+
+      - name: Install App Store Connect API key (notary)
+        env:
+          NOTARY_API_ISSUER_ID: ${{ secrets.NOTARY_API_ISSUER_ID }}
+          NOTARY_API_KEY_ID: ${{ secrets.NOTARY_API_KEY_ID }}
+          NOTARY_API_PRIVATE_KEY: ${{ secrets.NOTARY_API_PRIVATE_KEY }}
+        run: |
+          if [[ -z "$NOTARY_API_ISSUER_ID" || -z "$NOTARY_API_KEY_ID" || -z "$NOTARY_API_PRIVATE_KEY" ]]; then
+            echo "Missing notary secrets: NOTARY_API_ISSUER_ID, NOTARY_API_KEY_ID, NOTARY_API_PRIVATE_KEY." >&2
+            echo "See docs/BUILDING.md § GitHub Actions release." >&2
+            exit 1
+          fi
+          mkdir -p ~/.private_keys
+          KEY_PATH="$HOME/.private_keys/AuthKey_${NOTARY_API_KEY_ID}.p8"
+          printf '%s\n' "$NOTARY_API_PRIVATE_KEY" > "$KEY_PATH"
+          chmod 600 "$KEY_PATH"
+
+      - name: Build, sign, and notarize
+        env:
+          NOTARY_API_KEY_ID: ${{ secrets.NOTARY_API_KEY_ID }}
+          NOTARY_API_ISSUER_ID: ${{ secrets.NOTARY_API_ISSUER_ID }}
+        run: |
+          export NOTARY_API_KEY="$HOME/.private_keys/AuthKey_${NOTARY_API_KEY_ID}.p8"
+          make release
+
+      - name: Prepare release notes
+        run: |
+          VERSION="$(cat VERSION)"
+          NOTES="docs/RELEASE-v${VERSION}.md"
+          if [[ ! -f "$NOTES" ]]; then
+            echo "Missing release notes: $NOTES" >&2
+            exit 1
+          fi
+          cp "$NOTES" "$RUNNER_TEMP/release-notes.md"
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.RELEASE_TAG }}
+          name: Virt Manager Modern ${{ env.RELEASE_TAG }}
+          generate_release_notes: false
+          body_path: ${{ runner.temp }}/release-notes.md
+          files: |
+            dist/VirtManagerModern-*.zip
+            dist/VirtManagerModern-*.zip.sha256
+          draft: false
+          prerelease: false
