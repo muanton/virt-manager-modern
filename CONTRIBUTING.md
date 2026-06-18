@@ -33,9 +33,26 @@ Match the surrounding code. Comments explain *constraints the code can't show*,
 not what the next line does. UI strings are sentence case; errors should surface
 libvirt's actual message (see `LibvirtError`).
 
+## Versioning
+
+The app version lives in **`VERSION`** (semver `MAJOR.MINOR.PATCH`). Every
+merged change should bump it before commit:
+
+| Bump | When |
+|---|---|
+| **patch** (`make bump-patch`) | Bug fixes, docs, CI/build, refactors, small UX polish |
+| **minor** (`make bump-minor`) | New user-facing features or notable capability additions |
+| **major** (`make bump-major`) | Breaking changes or large architectural shifts |
+
+`make bump-*` updates `VERSION` and syncs `Resources/Info.plist`. `make app`
+also runs `sync-version` so the bundle always matches `VERSION`. Tag releases
+as `v$(cat VERSION)` (e.g. `v0.2.0`).
+
 ## Pull requests
 
 - Keep `swift test` green; add a test when you change `DomainModel` behavior.
+- **Bump `VERSION`** (see above) — include `VERSION` and `Resources/Info.plist`
+  in the same commit as your change.
 - One topic per PR. Screenshots for UI changes are appreciated.
 
 ## License

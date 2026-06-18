@@ -11,10 +11,22 @@ DEPS_PREFIX = third_party/prefix
 export PKG_CONFIG_PATH = $(CURDIR)/$(DEPS_PREFIX)/lib/pkgconfig:$(CURDIR)/$(DEPS_PREFIX)/share/pkgconfig:$(CURDIR)/third_party/sdk-pc
 
 ENTITLEMENTS = Resources/VirtManagerModern.entitlements
-VERSION = $(shell plutil -extract CFBundleShortVersionString raw Resources/Info.plist 2>/dev/null)
+VERSION = $(shell cat VERSION)
 RELEASE_ZIP = dist/$(APP_NAME)-$(VERSION).zip
 
-.PHONY: all deps build app sign release run run-dev test clean distclean
+.PHONY: all deps build sync-version bump-patch bump-minor bump-major app sign release run run-dev test clean distclean
+
+sync-version:
+	./Scripts/sync-version.sh
+
+bump-patch:
+	./Scripts/bump-version.sh patch
+
+bump-minor:
+	./Scripts/bump-version.sh minor
+
+bump-major:
+	./Scripts/bump-version.sh major
 
 all: app
 
@@ -27,8 +39,8 @@ build: deps
 	swift build -c release --product $(APP_NAME)
 
 # Assemble a double-clickable .app bundle around the release binary.
-app: build
-	@echo "Assembling $(APP_BUNDLE)…"
+app: build sync-version
+	@echo "Assembling $(APP_BUNDLE) ($(VERSION))…"
 	@rm -rf "$(APP_BUNDLE)"
 	@mkdir -p "$(CONTENTS)/MacOS" "$(CONTENTS)/Resources" "$(CONTENTS)/Frameworks"
 	@cp "$(BUILD_DIR)/$(APP_NAME)" "$(CONTENTS)/MacOS/$(APP_NAME)"

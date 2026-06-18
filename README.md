@@ -154,8 +154,10 @@ make sign       # Developer ID sign + verify (no notarization)
 make release    # sign → notarize → staple → dist/VirtManagerModern-<version>.zip
 ```
 
-Bundle ID: `com.muanton.virtmanagermodern`. See `Scripts/sign-and-notarize.sh`
-for environment overrides and `--sign-only` usage.
+Bundle ID: `com.muanton.virtmanagermodern`. App version is in `VERSION` (synced
+into the bundle on `make app`; bump with `make bump-patch` / `bump-minor` /
+`bump-major` — see [CONTRIBUTING.md](CONTRIBUTING.md#versioning)). See
+`Scripts/sign-and-notarize.sh` for environment overrides and `--sign-only` usage.
 
 ## Architecture
 

@@ -8,6 +8,7 @@ MacPorts, no pre-installed pkg-config/meson/cmake.
 make            # = make app: deps → swift build → .app bundle
 make run        # build + open
 make test       # swift test
+make bump-patch # bump VERSION + sync Info.plist (see CONTRIBUTING.md)
 make sign       # Developer ID sign (requires Apple cert in Keychain)
 make release    # sign → notarize → staple → dist/*.zip
 make clean      # remove app + Swift build artifacts (keeps third_party)
@@ -18,6 +19,8 @@ make distclean  # also wipe third_party (full dependency rebuild next time)
 
 | Target | What it does |
 |---|---|
+| `sync-version` | Writes `VERSION` into `Resources/Info.plist` (also runs as part of `app`). |
+| `bump-patch` / `bump-minor` / `bump-major` | Bump semver in `VERSION` and sync Info.plist. |
 | `deps` | Builds all C dependencies from pinned upstream releases into `third_party/prefix` (idempotent — stamps in `third_party/stamps`). |
 | `build` | `swift build -c release` with `PKG_CONFIG_PATH` pointed at the prefix. |
 | `app` | Assembles `VirtManagerModern.app`: copies the binary, Info.plist, icon, embeds the dylib closure, re-signs ad hoc. |
@@ -109,7 +112,8 @@ checksum alongside the zip. Environment overrides: `CODESIGN_IDENTITY`,
 `ENTITLEMENTS`, `NOTARY_PROFILE`, or `NOTARY_API_KEY` / `NOTARY_API_KEY_ID` /
 `NOTARY_API_ISSUER_ID`. See `Scripts/sign-and-notarize.sh --help`.
 
-Release notes template: [RELEASE-v0.1.0.md](RELEASE-v0.1.0.md).
+Release notes template: [RELEASE-v0.2.0.md](RELEASE-v0.2.0.md). Bump policy:
+[CONTRIBUTING.md](../CONTRIBUTING.md#versioning).
 
 ## App icon
 
