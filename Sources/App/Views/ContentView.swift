@@ -8,7 +8,7 @@ struct ConnectionEditorContext: Identifiable {
 
 struct ContentView: View {
     @EnvironmentObject var appState: AppState
-    @State private var selection: DomainSelection?
+    @State private var selection: SidebarSelection?
     @State private var editor: ConnectionEditorContext?
     @State private var newVMSession: ConnectionSession?
     @State private var deleteTarget: DeleteVMContext?
@@ -30,21 +30,25 @@ struct ContentView: View {
                 })
             .navigationSplitViewColumnWidth(min: 240, ideal: 270, max: 400)
         } detail: {
-            if let selection, let session = appState.session(id: selection.sessionID) {
-                DomainDetailView(session: session, uuid: selection.uuid,
-                                 openConsoleOnce: $openConsoleOnce,
-                                 onDelete: { domain in
-                                     deleteTarget = DeleteVMContext(session: session, domain: domain)
-                                 },
-                                 onClone: { domain in
-                                     cloneTarget = CloneVMContext(session: session, domain: domain)
-                                 })
-                    .id(selection)
-            } else {
-                ContentUnavailableView(
-                    "No VM Selected",
-                    systemImage: "desktopcomputer",
-                    description: Text("Select a virtual machine from the sidebar."))
+            switch selection {
+            case .vm(let sessionID, let uuid):
+                if let session = appState.session(id: sessionID) {
+                    DomainDetailView(session: session, uuid: uuid,
+                                     openConsoleOnce: $openConsoleOnce,
+                                     onDelete: { domain in
+                                         deleteTarget = DeleteVMContext(session: session, domain: domain)
+                                     },
+                                     onClone: { domain in
+                                         cloneTarget = CloneVMContext(session: session, domain: domain)
+                                     })
+                        .id(selection)
+                } else { unavailable }
+            case .host(let sessionID):
+                if let session = appState.session(id: sessionID) {
+                    HostDetailView(session: session).id(selection)
+                } else { unavailable }
+            case nil:
+                unavailable
             }
         }
         .sheet(item: $editor) { ctx in
@@ -59,18 +63,25 @@ struct ContentView: View {
         .sheet(item: $newVMSession) { session in
             NewVMSheet(session: session) { uuid, openConsole in
                 openConsoleOnce = openConsole
-                selection = DomainSelection(sessionID: session.id, uuid: uuid)
+                selection = .vm(sessionID: session.id, uuid: uuid)
             }
         }
         .sheet(item: $cloneTarget) { ctx in
             CloneVMSheet(session: ctx.session, domain: ctx.domain) { uuid in
-                selection = DomainSelection(sessionID: ctx.session.id, uuid: uuid)
+                selection = .vm(sessionID: ctx.session.id, uuid: uuid)
             }
         }
         .sheet(item: $deleteTarget) { ctx in
             DeleteVMSheet(session: ctx.session, domain: ctx.domain) {
-                if selection?.uuid == ctx.domain.uuid { selection = nil }
+                if selection?.vmUUID == ctx.domain.uuid { selection = nil }
             }
         }
+    }
+
+    private var unavailable: some View {
+        ContentUnavailableView(
+            "Nothing Selected",
+            systemImage: "server.rack",
+            description: Text("Select a host or a virtual machine from the sidebar."))
     }
 }

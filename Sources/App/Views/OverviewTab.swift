@@ -16,6 +16,12 @@ struct OverviewTab: View {
     @State private var screenshotData: Data?
     @State private var screenshotError: String?
     @State private var screenshotLoading = false
+    @State private var showAddForward = false
+    @State private var addForwardIP: String?
+    @State private var sshPrompt: IdentifiedIP?
+
+    /// Identifiable wrapper so the SSH prompt can drive `.sheet(item:)`.
+    struct IdentifiedIP: Identifiable { let id = UUID(); let ip: String }
 
     var body: some View {
         Form {
@@ -179,6 +185,18 @@ struct OverviewTab: View {
                                             } label: { Image(systemName: "doc.on.doc") }
                                                 .buttonStyle(.plain).foregroundStyle(.secondary)
                                                 .help("Copy IP address")
+                                            if session.config.sshHost != nil, let ip = ipv4(addr) {
+                                                Button { sshPrompt = IdentifiedIP(ip: ip) } label: {
+                                                    Image(systemName: "terminal")
+                                                }
+                                                .buttonStyle(.plain).foregroundStyle(.secondary)
+                                                .help("SSH to guest")
+                                                Button { addForwardIP = ip; showAddForward = true } label: {
+                                                    Image(systemName: "arrow.right.arrow.left")
+                                                }
+                                                .buttonStyle(.plain).foregroundStyle(.secondary)
+                                                .help("Forward a port from this guest")
+                                            }
                                         }
                                     }
                                     if let mac = iface.mac {
@@ -186,6 +204,24 @@ struct OverviewTab: View {
                                     }
                                 }
                             }
+                        }
+                    }
+                }
+                if session.config.sshHost != nil {
+                    Section("Port Forwarding") {
+                        let forwards = session.portForwards.filter { $0.vmUUID == domain.uuid }
+                        if forwards.isEmpty {
+                            Text("Forward a guest TCP port to your Mac over SSH.")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
+                        ForEach(forwards) { f in
+                            PortForwardRow(forward: f) { session.removePortForward(id: f.id) }
+                        }
+                        Button {
+                            addForwardIP = ifaces.flatMap { $0.addresses.compactMap(ipv4) }.first
+                            showAddForward = true
+                        } label: {
+                            Label("Add forward…", systemImage: "plus")
                         }
                     }
                 }
@@ -202,6 +238,21 @@ struct OverviewTab: View {
             }
         }
         .formStyle(.grouped)
+        .sheet(isPresented: $showAddForward) {
+            PortForwardSheet(ips: ipv4List, defaultIP: addForwardIP) { ip, port, label in
+                Task { await session.addPortForward(uuid: domain.uuid, guestIP: ip,
+                                                    guestPort: port, label: label) }
+            }
+        }
+        .sheet(item: $sshPrompt) { prompt in
+            SSHUserPrompt(guestIP: prompt.ip,
+                          defaultUser: session.config.sshUser ?? NSUserName()) { user in
+                guard let host = session.config.sshHost else { return }
+                QuickConnect.openSSH(sshHost: host, sshUser: session.config.sshUser,
+                                     sshPort: session.config.sshPort,
+                                     guestUser: user, guestIP: prompt.ip)
+            }
+        }
         .task(id: "\(domain.uuid)-\(domain.state.rawValue)") {
             hasManagedSave = (try? await session.hasManagedSave(uuid: domain.uuid)) ?? false
             guestLoaded = false
@@ -272,6 +323,66 @@ struct OverviewTab: View {
     private func memDomain(_ history: [ConnectionSession.StatSample]) -> ClosedRange<Double> {
         let top = history.map { Double(max($0.memTotalKiB, $0.memUsedKiB)) }.max() ?? 1
         return 0...max(1, top)
+    }
+
+    /// The IPv4 address from an `addr/prefix` string, or nil for IPv6.
+    private func ipv4(_ addr: String) -> String? {
+        let ip = String(addr.split(separator: "/").first ?? "")
+        return (ip.contains(".") && !ip.contains(":")) ? ip : nil
+    }
+
+    /// Distinct IPv4 addresses across all guest interfaces.
+    private var ipv4List: [String] {
+        var seen: [String] = []
+        for iface in ifaces {
+            for ip in iface.addresses.compactMap(ipv4) where !seen.contains(ip) {
+                seen.append(ip)
+            }
+        }
+        return seen
+    }
+}
+
+/// One active (or failed) port forward, with copy / open-in-browser / stop.
+private struct PortForwardRow: View {
+    let forward: PortForward
+    let onStop: () -> Void
+
+    var body: some View {
+        LabeledContent {
+            HStack(spacing: 10) {
+                switch forward.status {
+                case .starting:
+                    ProgressView().controlSize(.small)
+                case .active:
+                    Button { QuickConnect.copyLocalAddress(localPort: forward.localPort) } label: {
+                        Image(systemName: "doc.on.doc")
+                    }
+                    .buttonStyle(.plain).foregroundStyle(.secondary)
+                    .help("Copy localhost:\(forward.localPort)")
+                    Button { QuickConnect.openInBrowser(localPort: forward.localPort) } label: {
+                        Image(systemName: "safari")
+                    }
+                    .buttonStyle(.plain).foregroundStyle(.secondary)
+                    .help("Open http://localhost:\(forward.localPort)")
+                case .failed(let msg):
+                    Text(msg).font(.caption).foregroundStyle(.red).lineLimit(1).help(msg)
+                }
+                Button(action: onStop) { Image(systemName: "xmark.circle.fill") }
+                    .buttonStyle(.plain).foregroundStyle(.secondary)
+                    .help("Stop forward")
+            }
+        } label: {
+            VStack(alignment: .leading, spacing: 1) {
+                Text(forward.isLive
+                     ? "localhost:\(forward.localPort) → \(forward.guestIP):\(forward.guestPort)"
+                     : "\(forward.guestIP):\(forward.guestPort)")
+                    .monospaced().font(.callout)
+                if !forward.label.isEmpty {
+                    Text(forward.label).font(.caption).foregroundStyle(.secondary)
+                }
+            }
+        }
     }
 }
 

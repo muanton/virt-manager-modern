@@ -1,6 +1,7 @@
 import Foundation
 import LibvirtKit
 import DomainModel
+import ConsoleKit
 
 /// Live state for one connection: the open libvirt handle, its domains, and a
 /// background poll that keeps stats fresh. Domain list updates are event-driven.
@@ -22,6 +23,7 @@ final class ConnectionSession: ObservableObject, Identifiable {
     @Published private(set) var stats: [String: VMStats] = [:]
     @Published private(set) var configDrift: [String: Bool] = [:]
     @Published private(set) var pools: [StoragePoolInfo] = []
+    @Published private(set) var portForwards: [PortForward] = []
 
     struct DeviceIORates: Identifiable, Equatable {
         let id: String
@@ -113,6 +115,7 @@ final class ConnectionSession: ObservableObject, Identifiable {
         deregisterPoolEvents?()
         deregisterPoolEvents = nil
         conn?.close()
+        stopAllForwards()
         conn = nil
         domains = []
         pools = []
@@ -153,6 +156,7 @@ final class ConnectionSession: ObservableObject, Identifiable {
             } else {
                 Task { await refreshDomainList() }
             }
+            pruneStoppedForwards()
             Task { await refreshHostSummary() }
         case .defined:
             if let s = summary { upsertDomain(s) }
@@ -161,6 +165,7 @@ final class ConnectionSession: ObservableObject, Identifiable {
         default:
             if let s = summary { upsertDomain(s) }
             else { Task { await refreshDomainList() } }
+            pruneStoppedForwards()
             Task {
                 await refreshStats()
                 await refreshConfigDrift()
@@ -185,6 +190,7 @@ final class ConnectionSession: ObservableObject, Identifiable {
         deregisterPoolEvents?()
         deregisterPoolEvents = nil
         dead.close()
+        stopAllForwards()
         conn = nil
         stats = [:]
         statHistory = [:]
@@ -384,6 +390,50 @@ final class ConnectionSession: ObservableObject, Identifiable {
                                        readBps: readBps, writeBps: writeBps))
         }
         return (rates, nextLast)
+    }
+
+    // MARK: - Port forwarding
+
+    /// Opens an SSH `-L` tunnel from `localhost` to a guest IP:port (routed
+    /// through the libvirt host). No-op for non-SSH connections.
+    func addPortForward(uuid: String, guestIP: String, guestPort: Int, label: String) async {
+        guard let sshHost = config.sshHost else { return }
+        // Keep the tunnel a pure local across the await so it isn't shared with
+        // main-actor state mid-suspension (mirrors SpiceConsoleSession.start).
+        do {
+            let t = try SSHTunnel(sshHost: sshHost, sshUser: config.sshUser,
+                                  sshPort: config.sshPort,
+                                  remoteHost: guestIP, remotePort: guestPort)
+            try t.start()
+            try await t.waitUntilReady(timeout: 15)
+            portForwards.append(PortForward(vmUUID: uuid, guestIP: guestIP, guestPort: guestPort,
+                                            localPort: t.localPort, label: label,
+                                            status: .active, tunnel: t))
+        } catch {
+            portForwards.append(PortForward(vmUUID: uuid, guestIP: guestIP, guestPort: guestPort,
+                                            localPort: 0, label: label,
+                                            status: .failed(error.localizedDescription), tunnel: nil))
+        }
+    }
+
+    func removePortForward(id: UUID) {
+        guard let idx = portForwards.firstIndex(where: { $0.id == id }) else { return }
+        portForwards[idx].tunnel?.stop()
+        portForwards.remove(at: idx)
+    }
+
+    /// Tears down forwards for VMs that are no longer running.
+    private func pruneStoppedForwards() {
+        let active = Set(domains.filter { $0.isActive }.map { $0.uuid })
+        for f in portForwards where !active.contains(f.vmUUID) { f.tunnel?.stop() }
+        portForwards.removeAll { !active.contains($0.vmUUID) }
+    }
+
+    /// Stops every forward's `ssh` process. Called on disconnect/reconnect and
+    /// on app termination (orphaned children otherwise survive process exit).
+    func stopAllForwards() {
+        for f in portForwards { f.tunnel?.stop() }
+        portForwards = []
     }
 
     func hasConfigDrift(uuid: String) -> Bool {

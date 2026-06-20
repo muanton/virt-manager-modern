@@ -1,10 +1,23 @@
 import Foundation
 import Combine
+import AppKit
 
-/// Identifies a selected domain within a session (sidebar selection value).
-struct DomainSelection: Hashable {
-    let sessionID: UUID
-    let uuid: String
+/// A sidebar selection: either a connection's host, or a VM within a session.
+enum SidebarSelection: Hashable {
+    case host(UUID)                          // sessionID
+    case vm(sessionID: UUID, uuid: String)
+
+    var sessionID: UUID {
+        switch self {
+        case .host(let id): return id
+        case .vm(let id, _): return id
+        }
+    }
+
+    var vmUUID: String? {
+        if case .vm(_, let uuid) = self { return uuid }
+        return nil
+    }
 }
 
 /// Top-level app model: owns the saved connection configs and their live
@@ -32,6 +45,19 @@ final class AppState: ObservableObject {
         configs.removeAll { $0.isBuiltIn }
         if Self.testDriverEnabled { configs.insert(.testDriver, at: 0) }
         sessions = configs.map { ConnectionSession(config: $0) }
+
+        // ssh tunnel children are orphaned (not killed) when the app exits, so
+        // tear down every port forward on normal quit.
+        NotificationCenter.default.addObserver(
+            forName: NSApplication.willTerminateNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.stopAllPortForwards() }
+        }
+    }
+
+    /// Stops all port forwards across every connection (used on app termination).
+    func stopAllPortForwards() {
+        for session in sessions { session.stopAllForwards() }
     }
 
     private static var testDriverEnabled: Bool {

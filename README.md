@@ -16,6 +16,10 @@ consoles rendered natively in the window.
 |---|---|
 | ![Serial](docs/screenshots/serial.png) | ![Snapshots](docs/screenshots/snapshots.png) |
 
+| Host detail — Info / Storage / Networks | Guest port forwarding |
+|---|---|
+| ![Host detail](docs/screenshots/host.png) | ![Port forwarding](docs/screenshots/port-forwarding.png) |
+
 ## Why
 
 Running the original virt-manager on macOS is a rough ride: it's a GTK app
@@ -37,6 +41,9 @@ storage handled natively.
 - Self-contained `.app`: every library is built from pinned upstream sources
   and bundled. No Homebrew at runtime, nothing to break on a system update.
 - SSH tunnels for SPICE/VNC are created automatically per console.
+- **Guest port forwarding**: tunnel any guest TCP port to `localhost` over SSH,
+  with one-click **SSH to guest** (Terminal via ProxyJump) and **Open in
+  browser** — reachable even on a private libvirt network.
 - Quality-of-life extras virt-manager lacks: **ISO upload from your Mac** over
   libvirt streams (no scp), guest IPs with one-click copy, live CPU/memory
   stats in the VM list, VM search/filter, keyboard shortcuts for lifecycle
@@ -104,12 +111,15 @@ a 20-year-old C virtualization API, with its own reproducible toolchain.
   with one-click copy; QEMU guest agent status badge on Overview.
 - **VM screenshots** on the Overview tab (`virDomainScreenshot`), auto-refresh
   every 30s while running, with Save to disk.
-- **Host dashboard**: per-connection host info (CPU model, installed memory,
-  **live memory use**, VM counts, libvirt version) from the connection menu.
-- **Storage pool manager**: start/stop/rescan pools; **create**, **resize**,
-  **wipe**, and delete volumes; lists refresh on libvirt storage-pool events.
-- **Virtual network manager**: list/start/stop/delete networks; **XML editor**
-  for custom definitions; one-click default NAT network setup.
+- **Host detail view**: select a connection in the sidebar (it shows live memory
+  use and VM counts) to open a tabbed host view — **Info / Storage / Networks** —
+  the same way VMs open their own tabs:
+  - **Info**: CPU model, installed memory, **live memory use**, VM counts,
+    libvirt version.
+  - **Storage**: start/stop/rescan pools; **create**, **resize**, **wipe**, and
+    delete volumes; lists refresh on libvirt storage-pool events.
+  - **Networks**: list/start/stop/delete networks; **XML editor** for custom
+    definitions; one-click default NAT network setup.
 - **Snapshots**: create (incl. memory while running), revert, delete — shown
   as a tree with the current marker.
 - **Clone VM** with per-disk Clone/Share/Skip, and **ISO upload** from the Mac

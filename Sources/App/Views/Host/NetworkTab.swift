@@ -1,9 +1,9 @@
 import SwiftUI
 import LibvirtKit
 
-struct NetworksSheet: View {
+/// Virtual networks for a host. Ported from the former `NetworksSheet`.
+struct NetworkTab: View {
     @ObservedObject var session: ConnectionSession
-    @Environment(\.dismiss) private var dismiss
 
     @State private var loaded = false
     @State private var working = false
@@ -14,7 +14,6 @@ struct NetworksSheet: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack {
-                Text("Networks on \(session.config.name)").font(.title2).bold()
                 Spacer()
                 Button { Task { await reload() } } label: {
                     Label("Refresh", systemImage: "arrow.clockwise")
@@ -25,11 +24,11 @@ struct NetworksSheet: View {
                 Button("Add Default NAT…") { addDefault() }
                     .disabled(working)
             }
-            .padding()
+            .padding(.bottom, 8)
 
             if let error {
                 Label(error, systemImage: "exclamationmark.triangle.fill")
-                    .foregroundStyle(.orange).font(.caption).padding(.horizontal)
+                    .foregroundStyle(.orange).font(.caption).padding(.bottom, 8)
             }
 
             if !loaded {
@@ -37,21 +36,16 @@ struct NetworksSheet: View {
                 ProgressView().controlSize(.large).frame(maxWidth: .infinity)
                 Spacer()
             } else if session.networks.isEmpty {
+                Spacer()
                 ContentUnavailableView("No Networks", systemImage: "network",
                     description: Text("Define a virtual network to connect VMs to the host."))
+                Spacer()
             } else {
                 List(session.networks) { net in
                     networkRow(net)
                 }
             }
-
-            HStack {
-                Spacer()
-                Button("Done") { dismiss() }.keyboardShortcut(.defaultAction)
-            }
-            .padding()
         }
-        .frame(width: 560, height: 420)
         .task { await reload() }
         .sheet(item: $editor) { ctx in
             NetworkXMLEditorSheet(session: session, context: ctx) {

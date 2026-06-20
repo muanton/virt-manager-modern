@@ -3,7 +3,7 @@ import LibvirtKit
 
 struct SidebarView: View {
     @EnvironmentObject var appState: AppState
-    @Binding var selection: DomainSelection?
+    @Binding var selection: SidebarSelection?
     var onAdd: () -> Void
     var onEdit: (ConnectionConfig) -> Void
     var onNewVM: (ConnectionSession) -> Void
@@ -11,19 +11,13 @@ struct SidebarView: View {
     var onCloneVM: (ConnectionSession, DomainSummary) -> Void
 
     @State private var searchText = ""
-    @State private var storageSession: ConnectionSession?
-    @State private var networksSession: ConnectionSession?
-    @State private var hostSession: ConnectionSession?
 
     var body: some View {
         List(selection: $selection) {
             ForEach(appState.sessions) { session in
                 SessionSection(session: session, searchText: searchText, selection: $selection,
                                onEdit: onEdit, onNewVM: onNewVM, onDeleteVM: onDeleteVM,
-                               onCloneVM: onCloneVM,
-                               onStorage: { storageSession = session },
-                               onNetworks: { networksSession = session },
-                               onHost: { hostSession = session })
+                               onCloneVM: onCloneVM)
             }
         }
         .listStyle(.sidebar)
@@ -40,15 +34,6 @@ struct SidebarView: View {
                 } label: { Label("Add", systemImage: "plus") }
                 .help("Create a new virtual machine or add a connection")
             }
-        }
-        .sheet(item: $storageSession) { session in
-            StoragePoolsSheet(session: session)
-        }
-        .sheet(item: $networksSession) { session in
-            NetworksSheet(session: session)
-        }
-        .sheet(item: $hostSession) { session in
-            HostDashboardSheet(session: session)
         }
     }
 
@@ -75,14 +60,11 @@ private struct SessionSection: View {
     @EnvironmentObject var appState: AppState
     @ObservedObject var session: ConnectionSession
     let searchText: String
-    @Binding var selection: DomainSelection?
+    @Binding var selection: SidebarSelection?
     var onEdit: (ConnectionConfig) -> Void
     var onNewVM: (ConnectionSession) -> Void
     var onDeleteVM: (ConnectionSession, DomainSummary) -> Void
     var onCloneVM: (ConnectionSession, DomainSummary) -> Void
-    var onStorage: () -> Void
-    var onNetworks: () -> Void
-    var onHost: () -> Void
 
     private var filteredDomains: [DomainSummary] {
         let q = searchText.trimmingCharacters(in: .whitespaces).lowercased()
@@ -95,6 +77,10 @@ private struct SessionSection: View {
 
     var body: some View {
         Section {
+            hostRow
+                .tag(SidebarSelection.host(session.id))
+                .contextMenu { contextMenu }
+
             switch session.status {
             case .connecting:
                 Label("Connecting…", systemImage: "ellipsis")
@@ -127,22 +113,63 @@ private struct SessionSection: View {
                     domainRows
                 }
             }
-        } header: {
-            HStack(spacing: 8) {
-                Text(session.config.name)
-                Spacer()
-                statusDot
-                Menu { contextMenu } label: {
-                    Image(systemName: "ellipsis.circle")
-                }
-                .menuStyle(.borderlessButton)
-                .menuIndicator(.hidden)
-                .fixedSize()
-                .foregroundStyle(.secondary)
-                .padding(.trailing, 4)
-            }
         }
-        .contextMenu { contextMenu }
+    }
+
+    /// Selectable connection/host row: name, key stats, status, and the ⋯ menu.
+    private var hostRow: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "server.rack")
+                .foregroundStyle(.secondary)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(session.config.name).fontWeight(.semibold)
+                hostStatsCaption
+            }
+            Spacer(minLength: 0)
+            statusDot
+            Menu { contextMenu } label: {
+                Image(systemName: "ellipsis.circle")
+            }
+            .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
+            .fixedSize()
+            .foregroundStyle(.secondary)
+            .padding(.trailing, 4)
+        }
+        .padding(.vertical, 2)
+    }
+
+    @ViewBuilder private var hostStatsCaption: some View {
+        if session.isConnected {
+            let running = session.domains.filter(\.isActive).count
+            let defined = session.domains.count
+            Group {
+                if let mem = session.hostMemoryStats ?? session.hostSummary?.memory,
+                   let used = mem.usedKiB,
+                   let total = mem.totalKiB ?? session.hostSummary?.node.memoryKiB {
+                    Text("\(Format.memory(kiB: used)) of \(Format.memory(kiB: total)) · \(running)/\(defined) running")
+                } else {
+                    Text("\(running)/\(defined) VMs running")
+                }
+            }
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .monospacedDigit()
+        } else {
+            Text(statusText)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    private var statusText: String {
+        switch session.status {
+        case .connected: return "Connected"
+        case .connecting: return "Connecting…"
+        case .reconnecting: return "Reconnecting…"
+        case .disconnected: return "Disconnected"
+        case .failed: return "Connection failed"
+        }
     }
 
     @ViewBuilder private var domainRows: some View {
@@ -151,7 +178,8 @@ private struct SessionSection: View {
                 domain: domain,
                 stats: session.stats[domain.uuid],
                 hasConfigDrift: domain.isActive && session.hasConfigDrift(uuid: domain.uuid))
-                .tag(DomainSelection(sessionID: session.id, uuid: domain.uuid))
+                .padding(.leading, 12)
+                .tag(SidebarSelection.vm(sessionID: session.id, uuid: domain.uuid))
                 .contextMenu {
                     Button("Clone \(domain.name)…") { onCloneVM(session, domain) }
                     Divider()
@@ -178,9 +206,6 @@ private struct SessionSection: View {
     @ViewBuilder private var contextMenu: some View {
         if session.isConnected {
             Button("New VM…") { onNewVM(session) }
-            Button("Host Info…") { onHost() }
-            Button("Manage Storage…") { onStorage() }
-            Button("Manage Networks…") { onNetworks() }
             Divider()
             Button("Disconnect") { session.disconnect() }
             Button("Reconnect") { reconnect() }

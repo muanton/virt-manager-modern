@@ -1,9 +1,9 @@
 import SwiftUI
 import LibvirtKit
 
-struct StoragePoolsSheet: View {
+/// Storage pools and volumes for a host. Ported from the former `StoragePoolsSheet`.
+struct StorageTab: View {
     @ObservedObject var session: ConnectionSession
-    @Environment(\.dismiss) private var dismiss
 
     @State private var loaded = false
     @State private var working = false
@@ -25,7 +25,6 @@ struct StoragePoolsSheet: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack {
-                Text("Storage on \(session.config.name)").font(.title2).bold()
                 Spacer()
                 Button { Task { await reload() } } label: {
                     Label("Refresh", systemImage: "arrow.clockwise")
@@ -36,7 +35,7 @@ struct StoragePoolsSheet: View {
                 }
                 .disabled(working)
             }
-            .padding()
+            .padding(.bottom, 8)
 
             if let transferProgress {
                 VStack(alignment: .leading, spacing: 4) {
@@ -45,14 +44,14 @@ struct StoragePoolsSheet: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
-                .padding(.horizontal)
+                .padding(.bottom, 8)
             }
 
             if let error {
                 Label(error, systemImage: "exclamationmark.triangle.fill")
                     .foregroundStyle(.orange)
                     .font(.caption)
-                    .padding(.horizontal)
+                    .padding(.bottom, 8)
             }
 
             if !loaded {
@@ -60,8 +59,10 @@ struct StoragePoolsSheet: View {
                 ProgressView().controlSize(.large).frame(maxWidth: .infinity)
                 Spacer()
             } else if session.pools.isEmpty {
+                Spacer()
                 ContentUnavailableView("No Storage Pools", systemImage: "externaldrive",
                     description: Text("No libvirt storage pools were found on this host."))
+                Spacer()
             } else {
                 List {
                     ForEach(session.pools) { pool in
@@ -82,14 +83,7 @@ struct StoragePoolsSheet: View {
                     }
                 }
             }
-
-            HStack {
-                Spacer()
-                Button("Done") { dismiss() }.keyboardShortcut(.defaultAction)
-            }
-            .padding()
         }
-        .frame(width: 560, height: 480)
         .task { await reload() }
         .sheet(isPresented: $showingUpload) {
             UploadISOSheet(session: session) { _ in

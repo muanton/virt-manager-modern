@@ -44,6 +44,8 @@ How the app's feature set maps onto what libvirt offers for **remote** managemen
 | Network I/O stats (Overview) | `virConnectGetAllDomainStats` | ✅ |
 | Per-device disk & NIC I/O (Overview) | `VIR_DOMAIN_STATS_BLOCK` / `INTERFACE` | ✅ |
 | Historical CPU/mem/IO graphs (Overview) | buffered domain stats + Swift Charts | ✅ |
+| Guest port forwarding + SSH/browser quick-connect | reuse SSH `-L` tunnel to guest IP | ✅ |
+| Tabbed host detail (Info / Storage / Networks) | sidebar host selection + `TabView` | ✅ |
 | Config drift detection (live vs saved XML) | `virDomainGetXMLDesc` flags | ✅ |
 | Config drift revert + power-off warnings | live attach/detach, vCPU/memory | ✅ |
 | SPICE multi-monitor (display picker) | spice-gtk display channels | ✅ |

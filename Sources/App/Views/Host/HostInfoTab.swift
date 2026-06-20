@@ -1,9 +1,10 @@
 import SwiftUI
 import LibvirtKit
 
-struct HostDashboardSheet: View {
+/// Host overview: connection, VM counts, and hardware with a live memory bar.
+/// Ported from the former `HostDashboardSheet`.
+struct HostInfoTab: View {
     @ObservedObject var session: ConnectionSession
-    @Environment(\.dismiss) private var dismiss
 
     @State private var loaded = false
     @State private var error: String?
@@ -12,18 +13,16 @@ struct HostDashboardSheet: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack {
-                Text("Host — \(session.config.name)").font(.title2).bold()
+                if let error {
+                    Label(error, systemImage: "exclamationmark.triangle.fill")
+                        .foregroundStyle(.orange).font(.caption)
+                }
                 Spacer()
                 Button { Task { await reload() } } label: {
                     Label("Refresh", systemImage: "arrow.clockwise")
                 }
             }
-            .padding()
-
-            if let error {
-                Label(error, systemImage: "exclamationmark.triangle.fill")
-                    .foregroundStyle(.orange).font(.caption).padding(.horizontal)
-            }
+            .padding(.bottom, 8)
 
             if !loaded {
                 Spacer()
@@ -68,17 +67,12 @@ struct HostDashboardSheet: View {
                 }
                 .formStyle(.grouped)
             } else {
+                Spacer()
                 ContentUnavailableView("Host Unavailable", systemImage: "server.rack",
                     description: Text("Could not read host information."))
-            }
-
-            HStack {
                 Spacer()
-                Button("Done") { dismiss() }.keyboardShortcut(.defaultAction)
             }
-            .padding()
         }
-        .frame(width: 480, height: 420)
         .task {
             await reload()
             startLiveRefresh()
@@ -103,11 +97,7 @@ struct HostDashboardSheet: View {
 
     private func reload() async {
         await session.refreshHostSummary()
-        if session.hostSummary == nil {
-            error = "Failed to load host information."
-        } else {
-            error = nil
-        }
+        error = session.hostSummary == nil ? "Failed to load host information." : nil
         loaded = true
     }
 
