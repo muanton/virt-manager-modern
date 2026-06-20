@@ -94,7 +94,7 @@ public enum DomainTemplate {
         // kernels); Windows gets QXL, which has mature guest drivers.
         let video = "<video><model type='\(spec.os.videoModel)' heads='1'/></video>"
         let gfx = spec.graphics == .spice
-            ? "<graphics type='spice' autoport='yes' listen='127.0.0.1'/>"
+            ? "<graphics type='spice' autoport='yes' listen='127.0.0.1'><gl enable='no'/></graphics>"
             : "<graphics type='vnc' port='-1' autoport='yes' listen='127.0.0.1'/>"
 
         // Windows runs noticeably better with Hyper-V enlightenments and the
@@ -157,7 +157,6 @@ public enum DomainTemplate {
               <backend model='random'>/dev/urandom</backend>
             </rng>
             <memballoon model='virtio'/>
-            <redirdev bus='usb' type='spicevmc'/>
           </devices>
         </domain>
         """

@@ -1,5 +1,6 @@
 import SwiftUI
 import LibvirtKit
+import DomainModel
 import ConsoleKit
 import SpiceKit
 
@@ -19,6 +20,7 @@ struct DomainDetailView: View {
     @State private var pendingDriftAction: DomainAction?
     @State private var hasManagedSave = false
     @State private var lifecycleError: String?
+    @State private var confirmDisableGl = false
     @State private var tab = 0
 
     @StateObject private var vnc = VNCSession()
@@ -30,22 +32,7 @@ struct DomainDetailView: View {
     var body: some View {
         Group {
             if let domain {
-                TabView(selection: $tab) {
-                    OverviewTab(session: session, domain: domain)
-                        .tabItem { Label("Overview", systemImage: "info.circle") }.tag(0)
-                    ConsoleTab(session: session, domain: domain, vnc: vnc, spice: spice)
-                        .tabItem { Label("Console", systemImage: "display") }.tag(1)
-                    HardwareTab(session: session, uuid: uuid)
-                        .tabItem { Label("Hardware", systemImage: "slider.horizontal.3") }.tag(2)
-                    SnapshotsTab(session: session, domain: domain)
-                        .tabItem { Label("Snapshots", systemImage: "camera") }.tag(3)
-                }
-                .padding()
-                .navigationTitle(domain.name)
-                .navigationSubtitle(subtitle(for: domain))
-                .toolbar { lifecycleToolbar(domain) }
-                .toolbarBackground(.visible, for: .windowToolbar)
-                .background { lifecycleShortcuts(domain) }
+                detailTabs(domain)
                 .confirmationDialog("Force off \(domain.name)? Unsaved data may be lost.",
                                     isPresented: $confirmForceOff, titleVisibility: .visible) {
                     Button("Force Off", role: .destructive) { performLifecycle(.forceOff) }
@@ -78,6 +65,11 @@ struct DomainDetailView: View {
                 } message: {
                     Text(lifecycleError ?? "")
                 }
+                .confirmationDialog(glDisablePrompt(domain.name),
+                                    isPresented: $confirmDisableGl, titleVisibility: .visible) {
+                    Button("Disable OpenGL & Start") { disableGlAndStart() }
+                    Button("Cancel", role: .cancel) { confirmDisableGl = false }
+                }
             } else {
                 ContentUnavailableView("VM Unavailable", systemImage: "questionmark.folder")
             }
@@ -94,6 +86,26 @@ struct DomainDetailView: View {
         .onChange(of: tab) { _, newValue in appState.detailTabs[tabKey] = newValue }
     }
 
+    @ViewBuilder
+    private func detailTabs(_ domain: DomainSummary) -> some View {
+        TabView(selection: $tab) {
+            OverviewTab(session: session, domain: domain)
+                .tabItem { Label("Overview", systemImage: "info.circle") }.tag(0)
+            ConsoleTab(session: session, domain: domain, vnc: vnc, spice: spice)
+                .tabItem { Label("Console", systemImage: "display") }.tag(1)
+            HardwareTab(session: session, uuid: uuid)
+                .tabItem { Label("Hardware", systemImage: "slider.horizontal.3") }.tag(2)
+            SnapshotsTab(session: session, domain: domain)
+                .tabItem { Label("Snapshots", systemImage: "camera") }.tag(3)
+        }
+        .padding()
+        .navigationTitle(domain.name)
+        .navigationSubtitle(subtitle(for: domain))
+        .toolbar { lifecycleToolbar(domain) }
+        .toolbarBackground(.visible, for: .windowToolbar)
+        .background { lifecycleShortcuts(domain) }
+    }
+
     @ToolbarContentBuilder
     private func lifecycleToolbar(_ domain: DomainSummary) -> some ToolbarContent {
         ToolbarItemGroup(placement: .primaryAction) {
@@ -108,7 +120,7 @@ struct DomainDetailView: View {
                 driftAwareButton("Shut Down", "power", .shutdown, key: "d", modifiers: [.command, .shift],
                                  help: "Shut Down — graceful ACPI shutdown (⇧⌘D)")
                 driftAwareButton("Reboot", "arrow.clockwise", .reboot, key: "r", modifiers: [.command, .shift],
-                                 help: "Reboot — graceful guest restart (⇧⌘R)")
+                                 help: "Reboot — guest-agent/ACPI restart, hard reset if ignored (⇧⌘R)")
                 if !domain.state.isPaused {
                     Button { requestLifecycle(.save) } label: {
                         Label("Save", systemImage: "square.and.arrow.down")
@@ -258,6 +270,32 @@ struct DomainDetailView: View {
             do {
                 try await session.perform(action, on: uuid)
                 if action == .save { await refreshManagedSave() }
+            } catch {
+                if action == .start, DomainConfig.isSpiceGlLocalOnlyError(error.localizedDescription) {
+                    confirmDisableGl = true
+                } else {
+                    lifecycleError = error.localizedDescription
+                }
+            }
+        }
+    }
+
+    private func glDisablePrompt(_ name: String) -> String {
+        "\(name) has SPICE OpenGL enabled. OpenGL acceleration is local-only and can't start with "
+        + "the network console this app connects through. Disable OpenGL to start the VM?"
+    }
+
+    /// Rewrites the saved definition to `<gl enable='no'/>`, then retries the start.
+    private func disableGlAndStart() {
+        Task {
+            do {
+                let xml = try await session.editingDomainXML(uuid: uuid)
+                guard let newXML = try DomainConfig(xml: xml).xmlDisablingGraphicsGl() else {
+                    lifecycleError = "Couldn't read the VM's graphics configuration."
+                    return
+                }
+                _ = try await session.defineXML(newXML)
+                try await session.perform(.start, on: uuid)
             } catch {
                 lifecycleError = error.localizedDescription
             }

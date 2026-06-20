@@ -10,7 +10,6 @@ struct PreferencesView: View {
             Section("Console") {
                 Toggle("SPICE clipboard sharing", isOn: $prefs.spiceClipboardEnabled)
                 Toggle("SPICE audio", isOn: $prefs.spiceAudioEnabled)
-                Toggle("SPICE USB redirection", isOn: $prefs.spiceUsbEnabled)
                 Toggle("VNC clipboard redirection", isOn: $prefs.vncClipboardEnabled)
             }
             Section("Navigation") {

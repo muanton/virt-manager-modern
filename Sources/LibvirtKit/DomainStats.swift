@@ -83,7 +83,7 @@ extension LibvirtConnection {
                 guard let rec = records[i] else { continue }
                 var uuidBuf = [CChar](repeating: 0, count: Int(VIR_UUID_STRING_BUFLEN))
                 guard virDomainGetUUIDString(rec.pointee.dom, &uuidBuf) == 0 else { continue }
-                let uuid = String(cString: uuidBuf)
+                let uuid = String(cString: &uuidBuf)
 
                 var cpuTime: UInt64 = 0, current: UInt64 = 0, rss: UInt64 = 0, vcpus = 0
                 var blockAccum: [Int: (name: String?, rd: UInt64, wr: UInt64)] = [:]

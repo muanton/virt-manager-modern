@@ -150,6 +150,8 @@ public struct DomainConfig {
         let kind = GraphicsInfo.Kind(rawValue: g.attribute(forName: "type")?.stringValue ?? "") ?? .unknown
         let listen = g.attribute(forName: "listen")?.stringValue
             ?? g.elements(forName: "listen").first?.attribute(forName: "address")?.stringValue
+        let glEnabled = g.elements(forName: "gl").first?
+            .attribute(forName: "enable")?.stringValue?.lowercased() == "yes"
         return GraphicsInfo(
             kind: kind,
             port: g.attribute(forName: "port")?.stringValue.flatMap(Int.init),
@@ -158,7 +160,35 @@ public struct DomainConfig {
             listen: listen,
             password: g.attribute(forName: "passwd")?.stringValue,
             socketPath: g.attribute(forName: "socket")?.stringValue
-                ?? g.elements(forName: "listen").first?.attribute(forName: "socket")?.stringValue)
+                ?? g.elements(forName: "listen").first?.attribute(forName: "socket")?.stringValue,
+            glEnabled: glEnabled)
+    }
+
+    /// True when a domain-start failure is QEMU rejecting `<gl enable='yes'/>` on a
+    /// SPICE display that listens on a TCP port: "SPICE GL support is local-only for
+    /// now and incompatible with -spice port/tls-port". The remote console always
+    /// connects over a port, so disabling GL (see `xmlDisablingGraphicsGl`) is the fix.
+    public static func isSpiceGlLocalOnlyError(_ message: String) -> Bool {
+        let m = message.lowercased()
+        return m.contains("gl support") && m.contains("local-only")
+    }
+
+    /// Rewrites `<gl enable='yes'/>` to `no` so remote SPICE uses the standard
+    /// framebuffer instead of GL scanout (required for the native macOS console).
+    public func xmlDisablingGraphicsGl() -> String? {
+        guard let g = devices(named: "graphics").first else { return nil }
+        if let gl = g.elements(forName: "gl").first {
+            if let enable = gl.attribute(forName: "enable") {
+                enable.stringValue = "no"
+            } else {
+                gl.addAttribute(XMLNode.attribute(withName: "enable", stringValue: "no") as! XMLNode)
+            }
+        } else {
+            let gl = XMLElement(name: "gl")
+            gl.addAttribute(XMLNode.attribute(withName: "enable", stringValue: "no") as! XMLNode)
+            g.addChild(gl)
+        }
+        return xmlString()
     }
 
     // MARK: - Video device
@@ -219,9 +249,60 @@ public struct DomainConfig {
         if os?.elements(forName: "loader").first != nil { return "UEFI" }
         return "BIOS"
     }
+    public var firmwareIsEFI: Bool { firmwareLabel == "UEFI" }
 
     private func osType() -> XMLElement? {
         root.elements(forName: "os").first?.elements(forName: "type").first
+    }
+
+    // MARK: - Chipset / firmware
+
+    /// True when the machine type belongs to the Q35 (PCIe) family rather than
+    /// i440FX (legacy PCI).
+    public var chipsetIsQ35: Bool { machine.contains("q35") }
+
+    /// Switches the machine type between the Q35 and i440FX families, writing the
+    /// `q35` / `pc` alias libvirt expands to a versioned machine on define. Only
+    /// rewrites when the family actually changes — and when it does, it drops the
+    /// PCI controllers and every device `<address>` so libvirt re-derives a layout
+    /// valid for the new chipset (a Q35 PCIe address is invalid on i440FX).
+    public func setChipset(q35: Bool) {
+        guard let type = osType(), q35 != chipsetIsQ35 else { return }
+        Self.setAttr(type, "machine", q35 ? "q35" : "pc")
+        guard let devices = root.elements(forName: "devices").first else { return }
+        for el in devices.children?.compactMap({ $0 as? XMLElement }) ?? [] {
+            if el.name == "controller",
+               el.attribute(forName: "type")?.stringValue == "pci" {
+                devices.removeChild(at: el.index)
+                continue
+            }
+            for addr in el.elements(forName: "address") { el.removeChild(at: addr.index) }
+        }
+    }
+
+    /// Toggles firmware between BIOS and UEFI. For UEFI we set `<os firmware='efi'>`
+    /// and let libvirt autoselect the loader/NVRAM on define; for BIOS we drop the
+    /// attribute. The explicit loader/nvram and the feature-autoselection block are
+    /// always cleared so libvirt re-derives them — leaving an orphaned `<firmware>`
+    /// block without the `firmware='efi'` attribute makes libvirt reject the define
+    /// ("cannot use feature-based firmware autoselection when ... disabled").
+    public func setFirmware(efi: Bool) {
+        guard let os = root.elements(forName: "os").first else { return }
+        for name in ["loader", "nvram", "firmware"] {
+            for e in os.elements(forName: name) { os.removeChild(at: e.index) }
+        }
+        if efi {
+            Self.setAttr(os, "firmware", "efi")
+        } else {
+            os.removeAttribute(forName: "firmware")
+        }
+    }
+
+    /// True once an OS disk (a non-CD-ROM disk with a backing source) is attached.
+    /// Switching firmware after install almost always makes the guest unbootable,
+    /// so the editor locks the firmware control while this is true.
+    public var hasInstalledDisk: Bool {
+        disks.contains { $0.device != "cdrom" && !($0.source ?? "").isEmpty }
     }
 
     // MARK: - CPU mode / topology
@@ -290,7 +371,6 @@ public struct DomainConfig {
         guard let devs = root.elements(forName: "devices").first else { return [] }
         var counts: [String: Int] = [:]        // positional id counters
         var diskBusIndex: [String: Int] = [:]  // per-bus disk numbering
-        var redirIndex = 0
         var rows: [(rank: Int, doc: Int, device: Device)] = []
         var docIndex = 0
 
@@ -303,7 +383,7 @@ public struct DomainConfig {
             if name == "controller", Self.isHiddenController(el) { continue }
 
             let kind = Self.kind(for: el)
-            let title = Self.label(for: el, kind: kind, diskBusIndex: &diskBusIndex, redirIndex: &redirIndex)
+            let title = Self.label(for: el, kind: kind, diskBusIndex: &diskBusIndex)
             rows.append((Self.typeRank(kind), docIndex,
                          Device(id: "\(name)-\(idx)", kind: kind, title: title,
                                 subtitle: Self.subtitle(for: el, kind: kind),
@@ -410,7 +490,7 @@ public struct DomainConfig {
             return "This VM already has a TPM (only one is allowed)."
         case .watchdog where has("watchdog"):
             return "This VM already has a watchdog (only one is allowed)."
-        case .redirdev, .smartcard:
+        case .smartcard:
             return hasSPICEGraphics ? nil
                  : "Requires a SPICE display — add one first."
         default:
@@ -421,12 +501,6 @@ public struct DomainConfig {
     public var hasSPICEGraphics: Bool {
         allDeviceElements().contains {
             $0.name == "graphics" && $0.attribute(forName: "type")?.stringValue == "spice"
-        }
-    }
-
-    public var hasUsbRedirection: Bool {
-        allDeviceElements().contains {
-            $0.name == "redirdev" && $0.attribute(forName: "bus")?.stringValue == "usb"
         }
     }
 
@@ -466,7 +540,6 @@ public struct DomainConfig {
         case .controller: return 11
         case .filesystem: return 12
         case .smartcard: return 13
-        case .redirdev: return 14
         case .tpm: return 15
         case .rng: return 16
         case .memballoon, .other: return 99
@@ -646,10 +719,28 @@ public struct DomainConfig {
     public func setDiskSource(deviceID: String, path: String) {
         guard let el = element(forDeviceID: deviceID) else { return }
         Self.setAttr(el, "type", "file")
-        let s = Self.childElement(el, "source", create: true)!
-        s.removeAttribute(forName: "dev")
-        s.removeAttribute(forName: "volume")
+        for old in el.elements(forName: "source") { el.removeChild(at: old.index) }
+        guard !path.isEmpty else { return }
+        let s = XMLElement(name: "source")
         Self.setAttr(s, "file", path)
+        // libvirt expects <source> before <target>; append-only broke some defines.
+        if let driver = el.elements(forName: "driver").first {
+            el.insertChild(s, at: driver.index + 1)
+        } else if let backing = el.elements(forName: "backingStore").first {
+            el.insertChild(s, at: backing.index)
+        } else if let target = el.elements(forName: "target").first {
+            el.insertChild(s, at: target.index)
+        } else {
+            el.addChild(s)
+        }
+    }
+
+    /// Minimal CD-ROM fragment for `virDomainUpdateDevice` (driver, source,
+    /// target, readonly — no address/alias/boot).
+    public func cdromUpdateXML(deviceID: String) -> String? {
+        guard let d = disk(id: deviceID), d.device == "cdrom",
+              let path = d.source, !path.isEmpty else { return nil }
+        return DeviceBuilder.cdrom(path: path, bus: d.bus ?? "sata", target: d.target)
     }
 
     /// Removes a disk's media (`<source>`) in the working copy — ejecting a
@@ -735,7 +826,6 @@ public struct DomainConfig {
         case "serial": return .serial
         case "console": return .console
         case "hostdev": return .hostdev
-        case "redirdev": return .redirdev
         case "tpm": return .tpm
         case "rng": return .rng
         case "memballoon": return .memballoon
@@ -748,7 +838,7 @@ public struct DomainConfig {
 
     /// virt-manager-style device label (see `_label_for_device`).
     private static func label(for el: XMLElement, kind: DeviceKind,
-                              diskBusIndex: inout [String: Int], redirIndex: inout Int) -> String {
+                              diskBusIndex: inout [String: Int]) -> String {
         func childAttr(_ c: String, _ a: String) -> String? {
             el.elements(forName: c).first?.attribute(forName: a)?.stringValue
         }
@@ -794,9 +884,6 @@ public struct DomainConfig {
         case .filesystem: return "Filesystem \(childAttr("target", "dir") ?? "")".trimmed
         case .smartcard: return "Smartcard"
         case .tpm: return "TPM"
-        case .redirdev:
-            redirIndex += 1
-            return "\(busPretty(el.attribute(forName: "bus")?.stringValue ?? "usb")) Redirector \(redirIndex)"
         case .controller:
             let desc = controllerDesc(type: el.attribute(forName: "type")?.stringValue ?? "",
                                       model: el.attribute(forName: "model")?.stringValue)
@@ -869,8 +956,6 @@ public struct DomainConfig {
             let type = el.attribute(forName: "type")?.stringValue ?? ""
             if let idx = el.attribute(forName: "index")?.stringValue { return "\(type) · index \(idx)" }
             return type
-        case .redirdev:
-            return el.attribute(forName: "type")?.stringValue ?? ""
         case .channel:
             return el.elements(forName: "target").first?.attribute(forName: "name")?.stringValue ?? ""
         default:
@@ -984,10 +1069,6 @@ public struct DomainConfig {
                 return "Host device (\(type)): \(domain):\(slot).\(func_)"
             }
             return "Host device (\(type))"
-        case "redirdev":
-            let bus = el.attribute(forName: "bus")?.stringValue ?? "?"
-            let type = el.attribute(forName: "type")?.stringValue ?? "?"
-            return "USB redirection (\(bus), \(type))"
         default:
             return "\(kind(for: el).label): \(compactDeviceXML(el))"
         }

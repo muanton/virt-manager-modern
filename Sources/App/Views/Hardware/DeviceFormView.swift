@@ -25,7 +25,9 @@ struct DeviceFormView: View {
             }
             if onRemove != nil { removeSection }
             Section {
-                Text("Edits are staged — click **Apply Changes** to save; they take effect after the VM restarts.")
+                Text(device.kind == .cdrom
+                     ? "Edits are staged — **Apply Changes** saves the ISO and inserts it into a running VM immediately."
+                     : "Edits are staged — click **Apply Changes** to save; they take effect after the VM restarts.")
                     .font(.caption).foregroundStyle(.secondary)
             }
         }

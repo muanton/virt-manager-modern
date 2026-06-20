@@ -8,12 +8,14 @@ extension LibvirtConnection {
     /// `progress` is called with 0…1 off the main thread.
     public func uploadVolume(pool poolName: String, name: String, localURL: URL,
                              progress: @escaping @Sendable (Double) -> Void) async throws -> String {
-        let conn = rawConnectionForStreaming()
         return try await withCheckedThrowingContinuation { cont in
             DispatchQueue.global(qos: .utility).async {
                 do {
+                    // Reach the raw handle through `self` (an @unchecked Sendable
+                    // class) inside the closure rather than capturing the bare,
+                    // non-Sendable OpaquePointer.
                     cont.resume(returning: try Self.doUpload(
-                        conn: conn, poolName: poolName, name: name,
+                        conn: self.rawConnectionForStreaming(), poolName: poolName, name: name,
                         localURL: localURL, progress: progress))
                 } catch {
                     cont.resume(throwing: error)

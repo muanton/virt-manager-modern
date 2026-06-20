@@ -11,7 +11,7 @@ struct AddHardwareSheet: View {
         case controller = "Controller", input = "Input"
         case graphics = "Graphics", video = "Video", sound = "Sound"
         case serial = "Serial", console = "Console", channel = "Channel"
-        case usbredir = "USB Redirection", usbhost = "USB Host Device", pcihost = "PCI Host Device"
+        case usbhost = "USB Host Device", pcihost = "PCI Host Device"
         case watchdog = "Watchdog", rng = "RNG", tpm = "TPM"
         case filesystem = "Filesystem", smartcard = "Smartcard", memballoon = "Memory Balloon"
         var id: String { rawValue }
@@ -108,7 +108,6 @@ struct AddHardwareSheet: View {
         case .memballoon: return model.addBlockReason(for: .memballoon)
         case .tpm:        return model.addBlockReason(for: .tpm)
         case .watchdog:   return model.addBlockReason(for: .watchdog)
-        case .usbredir:   return model.addBlockReason(for: .redirdev)
         case .smartcard:  return model.addBlockReason(for: .smartcard)
         default:          return nil
         }
@@ -193,8 +192,6 @@ struct AddHardwareSheet: View {
                 Text("QEMU guest agent").tag("org.qemu.guest_agent.0")
                 Text("WebDAV").tag("org.spice-space.webdav.0")
             }
-        case .usbredir:
-            Text("Adds a SPICE USB redirection channel.").foregroundStyle(.secondary)
         case .usbhost:
             hostDevicePicker(devices: model.usbDevices, selection: $usbSel)
         case .pcihost:
@@ -249,7 +246,7 @@ struct AddHardwareSheet: View {
     private var hotpluggable: Bool {
         guard model.isRunning else { return false }
         switch category {
-        case .disk, .cdrom, .network, .usbhost, .usbredir: return true
+        case .disk, .cdrom, .network, .usbhost: return true
         default: return false
         }
     }
@@ -306,7 +303,6 @@ struct AddHardwareSheet: View {
             return channelTarget == "com.redhat.spice.0"
                 ? DeviceBuilder.spiceChannel()
                 : "<channel type='unix'>\n  <target type='virtio' name='\(channelTarget)'/>\n</channel>"
-        case .usbredir: return DeviceBuilder.usbRedir()
         case .usbhost:
             guard let d = model.usbDevices.first(where: { $0.id == usbSel }) else { throw err("No device") }
             return d.hostdevXML()

@@ -84,8 +84,10 @@ public enum DeviceSchema {
                              .init("0.0.0.0", "All interfaces")])),
                 .init("port", "Port", .attr("port"), .autoPort),
                 .init("passwd", "Password", .attr("passwd"), .text(placeholder: "none")),
+                // SPICE GL is local-only — a VM with gl=yes won't start while the
+                // display listens on a TCP port (which the remote console needs).
                 .init("gl", "OpenGL", .childAttr(child: "gl", attr: "enable"),
-                      .menu([.init("", "default"), .init("yes", "On"), .init("no", "Off")])),
+                      .menu([.init("", "default"), .init("yes", "On (local only)"), .init("no", "Off")])),
             ]
         case .video:
             return [
@@ -120,11 +122,6 @@ public enum DeviceSchema {
             ]
         case .hostdev:
             return [ .init("source", "Host Device", .custom("hostdev"), .hostDevice) ]
-        case .redirdev:
-            return [
-                .init("type", "Type", .attr("type"), .menu([.init("spicevmc", "SPICE"), .init("tcp", "TCP")])),
-                .init("bus", "Bus", .attr("bus"), .menu([.init("usb", "USB")])),
-            ]
         case .tpm:
             return [
                 .init("model", "Model", .attr("model"),

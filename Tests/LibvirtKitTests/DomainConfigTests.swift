@@ -101,16 +101,12 @@ final class DomainConfigTests: XCTestCase {
             sourceKind: "network", source: "default", model: "e1000", mac: nil))
         XCTAssertEqual(c.deviceList().filter { $0.kind == .interface }.count, 2)
 
-        try c.appendDeviceXML(DeviceBuilder.usbRedir())
-        XCTAssertTrue(c.deviceList().contains { $0.kind == .redirdev })
-
         c.removeDevice(id: "disk-0")
         XCTAssertEqual(c.deviceList().filter { $0.kind == .disk }.count, 0)
 
         // serialized output re-parses with the mutations intact
         let c2 = try DomainConfig(xml: c.xmlString())
         XCTAssertEqual(c2.deviceList().filter { $0.kind == .interface }.count, 2)
-        XCTAssertTrue(c2.deviceList().contains { $0.kind == .redirdev })
     }
 
     func testSetDeviceXMLUpdatesDiskBus() throws {
@@ -154,7 +150,7 @@ final class DomainConfigTests: XCTestCase {
 
     func testDefaultDeviceXMLAppends() throws {
         let c = try DomainConfig(xml: sample)
-        for kind in [DeviceKind.sound, .input, .watchdog, .rng, .tpm, .channel, .redirdev] {
+        for kind in [DeviceKind.sound, .input, .watchdog, .rng, .tpm, .channel] {
             let xml = try XCTUnwrap(DeviceBuilder.defaultXML(for: kind))
             try c.appendDeviceXML(xml)
         }
@@ -381,7 +377,7 @@ extension DomainConfigTests {
         XCTAssertNil(cfg.addBlockReason(for: .tpm))
         XCTAssertNil(cfg.addBlockReason(for: .watchdog))
         // SPICE present → spicevmc devices allowed; duplicates detectable.
-        XCTAssertNil(cfg.addBlockReason(for: .redirdev))
+        XCTAssertNil(cfg.addBlockReason(for: .smartcard))
         XCTAssertTrue(cfg.graphicsTypes.contains("spice"))
         XCTAssertTrue(cfg.channelTargetNames.contains("com.redhat.spice.0"))
         XCTAssertTrue(cfg.inputPairs.contains("tablet/usb"))
@@ -391,7 +387,6 @@ extension DomainConfigTests {
             of: "<graphics type='spice' autoport='yes'/>",
             with: "<graphics type='vnc' autoport='yes'/>")
         let cfg2 = try DomainConfig(xml: noSpice)
-        XCTAssertNotNil(cfg2.addBlockReason(for: .redirdev))
         XCTAssertNotNil(cfg2.addBlockReason(for: .smartcard))
     }
 }
@@ -463,6 +458,140 @@ extension DomainConfigTests {
         XCTAssertTrue(changes.contains { $0.label == "vCPUs" })
         XCTAssertTrue(changes.contains { $0.label == "Maximum memory" })
         XCTAssertTrue(changes.contains { $0.label == "Device" && $0.liveValue.contains("NIC") })
+    }
+
+    func testGraphicsGlEnabledAndDisable() throws {
+        let withGl = """
+        <domain type='kvm'>
+          <name>vm</name>
+          <devices>
+            <graphics type='spice' port='5900' autoport='no'>
+              <gl enable='yes'/>
+            </graphics>
+          </devices>
+        </domain>
+        """
+        let cfg = try DomainConfig(xml: withGl)
+        XCTAssertTrue(cfg.graphics?.glEnabled == true)
+        let out = try XCTUnwrap(cfg.xmlDisablingGraphicsGl())
+        XCTAssertTrue(out.contains("enable='no'") || out.contains("enable=\"no\""))
+        let cfg2 = try DomainConfig(xml: out)
+        XCTAssertFalse(cfg2.graphics?.glEnabled ?? true)
+    }
+
+    func testChipsetSwitchResetsPCITopology() throws {
+        let q35 = """
+        <domain type='kvm'>
+          <name>vm</name>
+          <os><type arch='x86_64' machine='pc-q35-noble'>hvm</type></os>
+          <devices>
+            <controller type='pci' model='pcie-root'/>
+            <controller type='usb' model='qemu-xhci'>
+              <address type='pci' domain='0x0000' bus='0x02' slot='0x00' function='0x0'/>
+            </controller>
+            <disk type='file' device='disk'>
+              <source file='/img/vm.qcow2'/><target dev='vda' bus='virtio'/>
+              <address type='pci' domain='0x0000' bus='0x04' slot='0x00' function='0x0'/>
+            </disk>
+          </devices>
+        </domain>
+        """
+        let cfg = try DomainConfig(xml: q35)
+        XCTAssertTrue(cfg.chipsetIsQ35)
+
+        // No-op when the family is unchanged: addresses and machine are preserved.
+        cfg.setChipset(q35: true)
+        XCTAssertEqual(cfg.machine, "pc-q35-noble")
+        XCTAssertTrue(cfg.xmlString().contains("bus='0x04'") || cfg.xmlString().contains("bus=\"0x04\""))
+
+        // Switching family writes the alias, drops PCI controllers, strips addresses.
+        cfg.setChipset(q35: false)
+        let out = cfg.xmlString()
+        XCTAssertFalse(cfg.chipsetIsQ35)
+        XCTAssertTrue(out.contains("machine='pc'") || out.contains("machine=\"pc\""))
+        XCTAssertFalse(out.contains("pcie-root"))         // PCI controllers removed
+        XCTAssertFalse(out.contains("type='pci' domain"))  // device addresses stripped
+        XCTAssertFalse(out.contains("type=\"pci\" domain"))
+        XCTAssertTrue(out.contains("qemu-xhci"))           // non-PCI controllers kept
+        XCTAssertTrue(out.contains("vda"))                 // disk itself kept
+    }
+
+    func testFirmwareToggleAndInstallGate() throws {
+        let bios = """
+        <domain type='kvm'>
+          <name>vm</name>
+          <os><type arch='x86_64' machine='q35'>hvm</type></os>
+          <devices>
+            <disk type='file' device='cdrom'>
+              <source file='/iso/install.iso'/><target dev='sda' bus='sata'/>
+            </disk>
+          </devices>
+        </domain>
+        """
+        let cfg = try DomainConfig(xml: bios)
+        XCTAssertEqual(cfg.firmwareLabel, "BIOS")
+        XCTAssertFalse(cfg.firmwareIsEFI)
+        XCTAssertFalse(cfg.hasInstalledDisk)   // only a CD-ROM attached
+
+        cfg.setFirmware(efi: true)
+        XCTAssertTrue(cfg.firmwareIsEFI)
+        XCTAssertEqual(cfg.firmwareLabel, "UEFI")
+        let efiOut = cfg.xmlString()
+        XCTAssertTrue(efiOut.contains("firmware='efi'") || efiOut.contains("firmware=\"efi\""))
+
+        cfg.setFirmware(efi: false)
+        XCTAssertFalse(cfg.firmwareIsEFI)
+        XCTAssertFalse(cfg.xmlString().contains("firmware="))
+
+        // An OS disk with a source flips the install gate.
+        let installed = try DomainConfig(xml: bios.replacingOccurrences(of: "device='cdrom'", with: "device='disk'"))
+        XCTAssertTrue(installed.hasInstalledDisk)
+    }
+
+    func testFirmwareEFIToBIOSClearsAutoselectionBlock() throws {
+        // A libvirt-autoselected UEFI guest: firmware='efi' attribute plus a
+        // <firmware> feature block, loader and nvram. Switching to BIOS must remove
+        // all of them, else define fails with "cannot use feature-based firmware
+        // autoselection when firmware autoselection is disabled".
+        let uefi = """
+        <domain type='kvm'>
+          <name>vm</name>
+          <os firmware='efi'>
+            <type arch='x86_64' machine='pc-q35-noble'>hvm</type>
+            <firmware>
+              <feature enabled='no' name='enrolled-keys'/>
+              <feature enabled='yes' name='secure-boot'/>
+            </firmware>
+            <loader readonly='yes' secure='yes' type='pflash'>/usr/share/OVMF/OVMF_CODE.secboot.fd</loader>
+            <nvram template='/usr/share/OVMF/OVMF_VARS.fd'>/var/lib/libvirt/qemu/nvram/vm_VARS.fd</nvram>
+            <boot dev='hd'/>
+          </os>
+        </domain>
+        """
+        let cfg = try DomainConfig(xml: uefi)
+        XCTAssertTrue(cfg.firmwareIsEFI)
+
+        cfg.setFirmware(efi: false)
+        let out = cfg.xmlString()
+        XCTAssertFalse(cfg.firmwareIsEFI)
+        XCTAssertFalse(out.contains("firmware="))   // attribute gone
+        XCTAssertFalse(out.contains("<firmware"))    // feature block gone
+        XCTAssertFalse(out.contains("<loader"))
+        XCTAssertFalse(out.contains("<nvram"))
+        XCTAssertTrue(out.contains("boot dev='hd'") || out.contains("boot dev=\"hd\""))
+    }
+
+    func testSpiceGlLocalOnlyErrorDetection() {
+        // The exact failure QEMU/libvirt reports for gl=yes + -spice port/tls-port.
+        let real = "internal error: process exited while connecting to monitor: "
+            + "2026-06-19T05:48:31Z qemu-system-x86_64: SPICE GL support is local-only "
+            + "for now and incompatible with -spice port/tls-port"
+        XCTAssertTrue(DomainConfig.isSpiceGlLocalOnlyError(real))
+        // Unrelated start failures must not trigger the GL recovery path.
+        XCTAssertFalse(DomainConfig.isSpiceGlLocalOnlyError(
+            "internal error: process exited while connecting to monitor: "
+            + "qemu-system-x86_64: could not open disk image: Permission denied"))
+        XCTAssertFalse(DomainConfig.isSpiceGlLocalOnlyError("Cannot access storage file"))
     }
 
     func testDeviceXMLBySignatureKeysMatchDiffSignatures() throws {
@@ -549,5 +678,51 @@ extension DomainConfigTests {
         XCTAssertTrue(ids.contains("opensuse16"))
         XCTAssertTrue(ids.contains("freebsd151"))
         XCTAssertFalse(ids.contains("fedora42"), "retired profiles should be removed")
+    }
+
+    func testCdromSourceInsertedBeforeTarget() throws {
+        let xml = """
+        <domain type='kvm'><name>vm</name><devices>
+          <disk type='file' device='cdrom'>
+            <driver name='qemu' type='raw'/>
+            <backingStore/>
+            <target dev='sda' bus='sata'/>
+            <readonly/>
+          </disk>
+        </devices></domain>
+        """
+        var cfg = try DomainConfig(xml: xml)
+        let id = try XCTUnwrap(cfg.deviceList().first { $0.kind == .cdrom }?.id)
+        cfg.setDiskSource(deviceID: id, path: "/images/install.iso")
+        let out = cfg.xmlString()
+        XCTAssertTrue(out.contains("install.iso"))
+        let driver = out.range(of: "<driver")
+        let source = out.range(of: "<source")
+        let target = out.range(of: "<target")
+        XCTAssertNotNil(driver); XCTAssertNotNil(source); XCTAssertNotNil(target)
+        XCTAssertLessThan(driver!.lowerBound, source!.lowerBound)
+        XCTAssertLessThan(source!.lowerBound, target!.lowerBound)
+    }
+
+    func testCdromUpdateXMLIsMinimal() throws {
+        let xml = """
+        <domain type='kvm'><name>vm</name><devices>
+          <disk type='file' device='cdrom'>
+            <driver name='qemu' type='raw'/>
+            <source file='/images/install.iso'/>
+            <target dev='sda' bus='sata'/>
+            <readonly/>
+            <boot order='1'/>
+            <address type='drive' controller='0' bus='0' target='0' unit='0'/>
+          </disk>
+        </devices></domain>
+        """
+        let cfg = try DomainConfig(xml: xml)
+        let id = try XCTUnwrap(cfg.deviceList().first { $0.kind == .cdrom }?.id)
+        let frag = try XCTUnwrap(cfg.cdromUpdateXML(deviceID: id))
+        XCTAssertTrue(frag.contains("/images/install.iso"))
+        XCTAssertTrue(frag.contains("<readonly/>"))
+        XCTAssertFalse(frag.contains("boot order"))
+        XCTAssertFalse(frag.contains("<address"))
     }
 }

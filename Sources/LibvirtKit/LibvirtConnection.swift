@@ -295,7 +295,9 @@ public final class LibvirtConnection: @unchecked Sendable {
                 switch action {
                 case .start:    rc = virDomainCreate(dom)
                 case .shutdown: rc = virDomainShutdown(dom)
-                case .reboot:   rc = virDomainReboot(dom, 0)
+                case .reboot:
+                    try Self.reboot(dom)
+                    return
                 case .forceOff: rc = virDomainDestroy(dom)
                 case .pause:    rc = virDomainSuspend(dom)
                 case .resume:   rc = virDomainResume(dom)
@@ -401,6 +403,40 @@ public final class LibvirtConnection: @unchecked Sendable {
         }
         defer { virDomainFree(dom) }
         return try body(dom)
+    }
+
+    /// Reboot a running guest: guest-agent when available, ACPI power-cycle,
+    /// then QEMU hard reset if the guest ignored the graceful signals (common
+    /// during OS install and early boot).
+    private static func reboot(_ dom: OpaquePointer) throws {
+        if virDomainReboot(dom, UInt32(VIR_DOMAIN_REBOOT_GUEST_AGENT.rawValue)) == 0 {
+            return
+        }
+        virResetLastError()
+
+        if virDomainReboot(dom, UInt32(VIR_DOMAIN_REBOOT_ACPI_POWER_BTN.rawValue)) == 0,
+           waitForRebootProgress(on: dom, seconds: 2) {
+            return
+        }
+        virResetLastError()
+
+        guard virDomainReset(dom, 0) == 0 else {
+            throw LibvirtError.lastError(fallback: "Reboot failed")
+        }
+    }
+
+    /// Returns true if the domain begins shutting down within `seconds`.
+    private static func waitForRebootProgress(on dom: OpaquePointer, seconds: Double) -> Bool {
+        let deadline = Date().addingTimeInterval(seconds)
+        while Date() < deadline {
+            var state: Int32 = 0
+            _ = virDomainGetState(dom, &state, nil, 0)
+            if state == DomainState.shuttingDown.rawValue || state == DomainState.shutoff.rawValue {
+                return true
+            }
+            Thread.sleep(forTimeInterval: 0.15)
+        }
+        return false
     }
 
     /// Extracts an immutable summary from a live `virDomainPtr`.

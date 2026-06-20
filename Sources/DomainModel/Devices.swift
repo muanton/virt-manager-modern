@@ -4,7 +4,7 @@ import Foundation
 /// label, and which editor to show.
 public enum DeviceKind: Equatable, Sendable {
     case disk, cdrom, interface, graphics, video, controller, sound, input
-    case channel, serial, console, hostdev, redirdev, tpm, rng, memballoon
+    case channel, serial, console, hostdev, tpm, rng, memballoon
     case watchdog, filesystem, smartcard
     case other(String)   // the raw element name
 
@@ -22,7 +22,6 @@ public enum DeviceKind: Equatable, Sendable {
         case .serial: return "Serial"
         case .console: return "Console"
         case .hostdev: return "Host Device"
-        case .redirdev: return "USB Redirection"
         case .tpm: return "TPM"
         case .rng: return "RNG"
         case .memballoon: return "Memory Balloon"
@@ -46,7 +45,6 @@ public enum DeviceKind: Equatable, Sendable {
         case .channel: return "antenna.radiowaves.left.and.right"
         case .serial, .console: return "terminal"
         case .hostdev: return "cpu"
-        case .redirdev: return "cable.connector.horizontal"
         case .tpm: return "lock.shield"
         case .rng: return "dice"
         case .memballoon: return "memorychip"
@@ -71,7 +69,6 @@ public enum DeviceKind: Equatable, Sendable {
         case .serial: return "serial"
         case .console: return "console"
         case .hostdev: return "hostdev"
-        case .redirdev: return "redirdev"
         case .tpm: return "tpm"
         case .rng: return "rng"
         case .memballoon: return "memballoon"
@@ -147,10 +144,6 @@ public enum DeviceBuilder {
         return s
     }
 
-    public static func usbRedir() -> String {
-        "<redirdev bus='usb' type='spicevmc'/>"
-    }
-
     /// SPICE agent channel (clipboard, resolution, etc.).
     public static func spiceChannel() -> String {
         "<channel type='spicevmc'>\n  <target type='virtio' name='com.redhat.spice.0'/>\n</channel>"
@@ -188,7 +181,6 @@ public enum DeviceBuilder {
         case .channel:    return spiceChannel()
         case .serial:     return "<serial type='pty'/>"
         case .console:    return "<console type='pty'/>"
-        case .redirdev:   return usbRedir()
         case .watchdog:   return "<watchdog model='i6300esb' action='reset'/>"
         case .rng:        return "<rng model='virtio'>\n  <backend model='random'>/dev/urandom</backend>\n</rng>"
         case .tpm:        return "<tpm model='tpm-tis'>\n  <backend type='emulator' version='2.0'/>\n</tpm>"

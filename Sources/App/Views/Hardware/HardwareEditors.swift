@@ -35,8 +35,8 @@ struct GeneralEditor: View {
                 LabeledContent("Hypervisor", value: model.domainType.uppercased())
                 LabeledContent("Architecture", value: model.arch)
                 LabeledContent("Emulator", value: model.emulator)
-                LabeledContent("Chipset", value: model.machine)
-                LabeledContent("Firmware", value: model.firmwareLabel)
+                chipsetRow
+                firmwareRow
             }
             Section { StagedNote() }
         }
@@ -48,6 +48,33 @@ struct GeneralEditor: View {
         }
         // Stage title/description on focus loss too (not just Return).
         .onDisappear { model.setTitle(title); model.setDescription(desc) }
+    }
+
+    @ViewBuilder private var chipsetRow: some View {
+        Picker("Chipset", selection: Binding(
+            get: { model.chipsetIsQ35 },
+            set: { model.setChipset(q35: $0) })) {
+            Text("Q35 (modern)").tag(true)
+            Text("i440FX (legacy)").tag(false)
+        }
+        Text("Switching chipset rebuilds the virtual PCI layout; the guest may need driver or boot "
+           + "changes. Takes effect after restart.")
+            .font(.caption).foregroundStyle(.secondary)
+    }
+
+    @ViewBuilder private var firmwareRow: some View {
+        Picker("Firmware", selection: Binding(
+            get: { model.firmwareIsEFI },
+            set: { model.setFirmware(efi: $0) })) {
+            Text("BIOS").tag(false)
+            Text("UEFI").tag(true)
+        }
+        if model.firmwareChangeRisky {
+            Label("This VM already has a disk installed — switching firmware will likely stop it "
+                + "from booting. Takes effect after restart.",
+                  systemImage: "exclamationmark.triangle.fill")
+                .font(.caption).foregroundStyle(.orange)
+        }
     }
 }
 

@@ -19,11 +19,12 @@ struct ConsoleTab: View {
     @State private var loaded = false
     @State private var loadError: String?
     @State private var showQXLBanner = true
+    @State private var showGlBanner = true
+    @State private var graphicsGlEnabled = false
     @State private var switching = false
     @State private var switchResult: String?
+    @State private var glSwitchResult: String?
     @State private var connectedForDomainID: Int32 = -2
-    @State private var hasUsbRedirection = false
-    @State private var showUsbPicker = false
     @State private var monitorPickerID = ""
     @StateObject private var detach = ConsoleDetachController()
 
@@ -36,6 +37,7 @@ struct ConsoleTab: View {
         GeometryReader { geo in
             VStack(spacing: 0) {
                 if showQXLBanner, videoModel == "qxl" { qxlBanner }
+                if showGlBanner, needsGlBanner { glBanner }
                 if domain.state.isActive, graphics != nil, hasSerialDevice {
                     Picker("", selection: $consoleMode) {
                         Text("Display").tag("graphical")
@@ -54,9 +56,6 @@ struct ConsoleTab: View {
         .task(id: taskKey) { await prepare() }
         .onDisappear { detach.reattach() }
         .toolbar { consoleToolbar }
-        .sheet(isPresented: $showUsbPicker) {
-            SpiceUsbPickerSheet(spice: spice, vmHasUsbChannel: hasUsbRedirection)
-        }
     }
 
     @ToolbarContentBuilder
@@ -85,12 +84,6 @@ struct ConsoleTab: View {
                             monitorPickerID = selected
                         }
                     }
-                }
-                if spice.status == .connected, preferences.spiceUsbEnabled {
-                    Button { showUsbPicker = true } label: {
-                        Label("USB Devices", systemImage: "cable.connector")
-                    }
-                    .help("Redirect USB devices into the guest")
                 }
                 if detach.isDetached {
                     Button { detach.reattach() } label: {
@@ -125,6 +118,10 @@ struct ConsoleTab: View {
         }
     }
 
+    private var needsGlBanner: Bool {
+        graphics?.kind == .spice && (graphicsGlEnabled || spice.glScanoutActive)
+    }
+
     // MARK: - QXL warning
 
     private var qxlBanner: some View {
@@ -150,6 +147,49 @@ struct ConsoleTab: View {
         }
         .padding(10)
         .background(Color.orange.opacity(0.12))
+    }
+
+    private var glBanner: some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("OpenGL scanout is enabled").font(.callout).bold()
+                Text("The native console cannot render virtio-gpu GL scanout over a remote "
+                   + "SPICE tunnel. Disable OpenGL on the graphics device to use the standard "
+                   + "framebuffer (power-cycle the VM after changing).")
+                    .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                if let glSwitchResult {
+                    Text(glSwitchResult).font(.caption).foregroundStyle(.green)
+                }
+            }
+            Spacer()
+            Button(switching ? "Saving…" : "Disable OpenGL") {
+                Task { await disableGraphicsGl() }
+            }
+            .disabled(switching)
+            Button { showGlBanner = false } label: { Image(systemName: "xmark") }
+                .buttonStyle(.plain).foregroundStyle(.secondary)
+        }
+        .padding(10)
+        .background(Color.orange.opacity(0.12))
+    }
+
+    private func disableGraphicsGl() async {
+        switching = true
+        defer { switching = false }
+        do {
+            let xml = try await session.domainXML(uuid: domain.uuid)
+            let cfg = try DomainConfig(xml: xml)
+            guard let newXML = cfg.xmlDisablingGraphicsGl() else {
+                glSwitchResult = "Couldn't read the VM's graphics configuration."
+                return
+            }
+            _ = try await session.defineXML(newXML)
+            graphicsGlEnabled = false
+            glSwitchResult = "OpenGL disabled. Shut down and start the VM to apply."
+        } catch {
+            glSwitchResult = error.localizedDescription
+        }
     }
 
     private func switchToVirtio() async {
@@ -289,8 +329,8 @@ struct ConsoleTab: View {
         let cfg = try? DomainConfig(xml: xml)
         let g = cfg?.graphics
         graphics = g
+        graphicsGlEnabled = g?.glEnabled ?? false
         videoModel = cfg?.videoModel
-        hasUsbRedirection = cfg?.hasUsbRedirection ?? false
         hasSerialDevice = cfg?.deviceList().contains {
             $0.kind == .serial || $0.kind == .console
         } ?? false
@@ -322,8 +362,7 @@ struct ConsoleTab: View {
         case .spice:
             await spice.start(target,
                               clipboardEnabled: preferences.spiceClipboardEnabled,
-                              audioEnabled: preferences.spiceAudioEnabled,
-                              usbEnabled: preferences.spiceUsbEnabled)
+                              audioEnabled: preferences.spiceAudioEnabled)
         default:     break
         }
     }

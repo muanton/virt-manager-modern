@@ -41,6 +41,23 @@ final class ConnectionSession: ObservableObject, Identifiable {
         var blockDevices: [DeviceIORates] = []
         var netDevices: [DeviceIORates] = []
     }
+
+    /// One point in a VM's rolling usage history, captured each poll cycle.
+    struct StatSample: Identifiable, Equatable {
+        let at: Date
+        let cpuPercent: Double
+        let memUsedKiB: UInt64
+        let memTotalKiB: UInt64
+        let diskReadBps: UInt64
+        let diskWriteBps: UInt64
+        let netRxBps: UInt64
+        let netTxBps: UInt64
+        var id: Date { at }
+    }
+    /// Per-VM rolling history of `StatSample`s (oldest first), capped at
+    /// `maxHistorySamples` — about 10 minutes at the 5 s poll cadence.
+    @Published private(set) var statHistory: [String: [StatSample]] = [:]
+    private let maxHistorySamples = 120
     private var lastCPUSamples: [String: (timeNs: UInt64, at: Date)] = [:]
     private var lastBlockSamples: [String: (readBytes: UInt64, writeBytes: UInt64, at: Date)] = [:]
     private var lastNetSamples: [String: (rxBytes: UInt64, txBytes: UInt64, at: Date)] = [:]
@@ -99,6 +116,8 @@ final class ConnectionSession: ObservableObject, Identifiable {
         conn = nil
         domains = []
         pools = []
+        stats = [:]
+        statHistory = [:]
         hostSummary = nil
         hostMemoryStats = nil
         status = .disconnected
@@ -124,6 +143,7 @@ final class ConnectionSession: ObservableObject, Identifiable {
             if let uuid = summary?.uuid {
                 domains.removeAll { $0.uuid == uuid }
                 stats.removeValue(forKey: uuid)
+                statHistory.removeValue(forKey: uuid)
                 configDrift.removeValue(forKey: uuid)
                 lastCPUSamples.removeValue(forKey: uuid)
                 lastBlockSamples.removeValue(forKey: uuid)
@@ -167,6 +187,7 @@ final class ConnectionSession: ObservableObject, Identifiable {
         dead.close()
         conn = nil
         stats = [:]
+        statHistory = [:]
         configDrift = [:]
         lastCPUSamples = [:]
         lastBlockSamples = [:]
@@ -250,6 +271,7 @@ final class ConnectionSession: ObservableObject, Identifiable {
         guard let conn, let raw = try? await conn.allDomainStats() else { return }
         let now = Date()
         var next: [String: VMStats] = [:]
+        var nextHistory: [String: [StatSample]] = [:]
         for (uuid, s) in raw {
             var cpu: Double = 0
             if let prev = lastCPUSamples[uuid], s.cpuTimeNs >= prev.timeNs {
@@ -315,8 +337,20 @@ final class ConnectionSession: ObservableObject, Identifiable {
                                  netTxBps: txBps,
                                  blockDevices: blockRates.rates,
                                  netDevices: netRates.rates)
+
+            var history = statHistory[uuid] ?? []
+            history.append(StatSample(at: now, cpuPercent: cpu,
+                                      memUsedKiB: s.balloonRSSKiB,
+                                      memTotalKiB: s.balloonCurrentKiB,
+                                      diskReadBps: readBps, diskWriteBps: writeBps,
+                                      netRxBps: rxBps, netTxBps: txBps))
+            if history.count > maxHistorySamples {
+                history.removeFirst(history.count - maxHistorySamples)
+            }
+            nextHistory[uuid] = history
         }
         stats = next
+        statHistory = nextHistory
         lastCPUSamples = lastCPUSamples.filter { next[$0.key] != nil }
         lastBlockSamples = lastBlockSamples.filter { next[$0.key] != nil }
         lastNetSamples = lastNetSamples.filter { next[$0.key] != nil }
@@ -423,6 +457,26 @@ final class ConnectionSession: ObservableObject, Identifiable {
 
     func domainPersistentXML(uuid: String) async throws -> String {
         try await requireConnection().domainPersistentXML(uuid: uuid)
+    }
+
+    /// Saved domain definition for the hardware editor. While a VM is running,
+    /// `domainXML` returns the live config (which may lack staged CD-ROM media);
+    /// this returns the persistent definition that `defineXML` writes.
+    func editingDomainXML(uuid: String) async throws -> String {
+        if domain(uuid: uuid)?.isActive == true {
+            return try await domainPersistentXML(uuid: uuid)
+        }
+        return try await domainXML(uuid: uuid)
+    }
+
+    /// Inserts or replaces CD-ROM media on a running guest (live + saved).
+    func syncCdromMedia(uuid: String, config: DomainConfig) async throws {
+        guard domain(uuid: uuid)?.isActive == true else { return }
+        let conn = try requireConnection()
+        for device in config.deviceList() where device.kind == .cdrom {
+            guard let xml = config.cdromUpdateXML(deviceID: device.id) else { continue }
+            try await conn.updateDevice(uuid: uuid, deviceXML: xml, live: true, persistent: true)
+        }
     }
 
     func domainIsUpdated(uuid: String) async throws -> Bool {
@@ -551,7 +605,7 @@ final class ConnectionSession: ObservableObject, Identifiable {
             VMMLog.session.info("\(String(describing: action), privacy: .public) on \(name, privacy: .public)")
         }
         switch action {
-        case .shutdown, .reboot, .forceOff: await ejectAllCDROMs(uuid: uuid)
+        case .shutdown, .reboot, .forceOff: await ejectCdromMediaLive(uuid: uuid)
         default: break
         }
         try await conn.perform(action, uuid: uuid)
@@ -582,14 +636,16 @@ final class ConnectionSession: ObservableObject, Identifiable {
         return nil
     }
 
-    func ejectAllCDROMs(uuid: String) async {
-        guard let conn,
+    /// Ejects installer media from the running guest only — saved config keeps
+    /// the ISO path so the next start still has the disc the user configured.
+    func ejectCdromMediaLive(uuid: String) async {
+        guard domain(uuid: uuid)?.isActive == true,
+              let conn,
               let xml = try? await conn.domainXML(uuid: uuid),
               let cfg = try? DomainConfig(xml: xml) else { return }
-        let live = domain(uuid: uuid)?.isActive ?? false
         for deviceXML in cfg.cdromEjectXMLs() {
             try? await conn.updateDevice(uuid: uuid, deviceXML: deviceXML,
-                                         live: live, persistent: true)
+                                         live: true, persistent: false)
         }
     }
 

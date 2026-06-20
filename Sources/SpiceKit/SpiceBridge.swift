@@ -151,15 +151,9 @@ let spiceMonitorsChanged: @convention(c) (UnsafeMutableRawPointer?) -> Void = { 
     DispatchQueue.main.async { spiceBridge(ctx)?.session?.handleMonitorsChanged() }
 }
 
-let spiceUsbDevicesChanged: @convention(c) (UnsafeMutableRawPointer?) -> Void = { ctx in
-    DispatchQueue.main.async { spiceBridge(ctx)?.session?.handleUsbDevicesChanged() }
-}
-
-let spiceUsbRedirectResult: @convention(c) (
-    UnsafeMutableRawPointer?, UInt32, Int32, UnsafePointer<CChar>?) -> Void = { ctx, deviceID, ok, err in
-    let message = err.map { String(cString: $0) }
+let spiceGlScanoutActive: @convention(c) (
+    UnsafeMutableRawPointer?, Int32) -> Void = { ctx, active in
     DispatchQueue.main.async {
-        spiceBridge(ctx)?.session?.handleUsbRedirectResult(
-            deviceID: deviceID, ok: ok != 0, error: message)
+        spiceBridge(ctx)?.session?.handleGlScanoutActive(active != 0)
     }
 }

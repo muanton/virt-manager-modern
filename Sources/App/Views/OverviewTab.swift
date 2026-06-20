@@ -119,6 +119,25 @@ struct OverviewTab: View {
                                    devices: s.netDevices)
                 }
             }
+            if domain.isActive, let history = session.statHistory[domain.uuid] {
+                Section("History (last 10 min)") {
+                    if history.count >= 2 {
+                        StatChart(title: "CPU", samples: history, yDomain: 0...100, tint: .blue,
+                                  format: { String(format: "%.0f%%", $0) },
+                                  value: { $0.cpuPercent })
+                        StatChart(title: "Memory", samples: history, yDomain: memDomain(history),
+                                  tint: .green,
+                                  format: { Format.memory(kiB: UInt64(max(0, $0))) },
+                                  value: { Double($0.memUsedKiB) })
+                        DualStatChart(title: "Disk I/O", samples: history,
+                                      series: [("Read", \.diskReadBps), ("Write", \.diskWriteBps)])
+                        DualStatChart(title: "Network I/O", samples: history,
+                                      series: [("Rx", \.netRxBps), ("Tx", \.netTxBps)])
+                    } else {
+                        Text("Collecting data…").foregroundStyle(.secondary).font(.caption)
+                    }
+                }
+            }
             if domain.isActive {
                 Section("Display") {
                     if screenshotLoading, screenshotData == nil {
@@ -246,6 +265,13 @@ struct OverviewTab: View {
         case .unavailable: return .orange
         case .inactive: return .secondary
         }
+    }
+
+    /// Y-axis top for the memory chart: the largest of total/used seen in the
+    /// window, so the area never clips when RSS briefly exceeds the balloon size.
+    private func memDomain(_ history: [ConnectionSession.StatSample]) -> ClosedRange<Double> {
+        let top = history.map { Double(max($0.memTotalKiB, $0.memUsedKiB)) }.max() ?? 1
+        return 0...max(1, top)
     }
 }
 

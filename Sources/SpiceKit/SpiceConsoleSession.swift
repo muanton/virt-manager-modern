@@ -31,30 +31,6 @@ public struct SpiceMonitor: Identifiable, Equatable, Sendable {
     }
 }
 
-/// A host USB device that can be redirected into the SPICE guest.
-public struct SpiceUsbDevice: Identifiable, Equatable, Sendable {
-    public let id: UInt32
-    public let description: String
-    public let connected: Bool
-    public let canRedirect: Bool
-    public let blockReason: String?
-
-    init(_ info: VMMUsbDeviceInfo) {
-        id = info.id
-        description = Self.cString(info.description)
-        connected = info.connected != 0
-        canRedirect = info.can_redirect != 0
-        let reason = Self.cString(info.block_reason)
-        blockReason = reason.isEmpty ? nil : reason
-    }
-
-    private static func cString<T>(_ field: T) -> String {
-        withUnsafePointer(to: field) { ptr in
-            String(cString: UnsafeRawPointer(ptr).assumingMemoryBound(to: CChar.self))
-        }
-    }
-}
-
 /// Drives a SPICE console: opens the SSH tunnel (if needed), runs the spice-gtk
 /// session on its own GLib thread, and publishes a live display `NSView`.
 /// Mirrors `VNCSession` so the UI can treat the two consoles uniformly.
@@ -69,8 +45,7 @@ public final class SpiceConsoleSession: ObservableObject {
     @Published public private(set) var displayView: NSView?
     @Published public private(set) var monitors: [SpiceMonitor] = []
     @Published public private(set) var selectedMonitorID: String?
-    @Published public private(set) var usbDevices: [SpiceUsbDevice] = []
-    @Published public var usbMessage: String?
+    @Published public private(set) var glScanoutActive = false
 
     private var handle: OpaquePointer?            // VMMSpiceSession*
     private let bridge = SpiceBridge()
@@ -81,8 +56,7 @@ public final class SpiceConsoleSession: ObservableObject {
 
     public func start(_ target: ConsoleTarget,
                       clipboardEnabled: Bool = true,
-                      audioEnabled: Bool = true,
-                      usbEnabled: Bool = true) async {
+                      audioEnabled: Bool = true) async {
         guard canStart else { return }
         status = .tunneling
 
@@ -124,17 +98,14 @@ public final class SpiceConsoleSession: ObservableObject {
         cb.clipboard_guest_request = spiceClipboardRequest
         cb.clipboard_guest_release = spiceClipboardRelease
         cb.clipboard_guest_data = spiceClipboardData
-        cb.usb_devices_changed = spiceUsbDevicesChanged
-        cb.usb_redirect_result = spiceUsbRedirectResult
         cb.monitors_changed = spiceMonitorsChanged
+        cb.gl_scanout_active = spiceGlScanoutActive
 
         handle = vmm_spice_session_create(host, Int32(port), target.password, cb)
         vmm_spice_audio_enable(handle, audioEnabled ? 1 : 0)
-        vmm_spice_usb_enable(handle, usbEnabled ? 1 : 0)
         vmm_spice_session_start(handle)
         clipboard.start(session: self, handle: handle, enabled: clipboardEnabled)
         refreshMonitors()
-        refreshUsbDevices()
     }
 
     public func stop() {
@@ -146,8 +117,7 @@ public final class SpiceConsoleSession: ObservableObject {
         displayView = nil
         monitors = []
         selectedMonitorID = nil
-        usbDevices = []
-        usbMessage = nil
+        glScanoutActive = false
         status = .idle
     }
 
@@ -222,41 +192,7 @@ public final class SpiceConsoleSession: ObservableObject {
 
     func handleMonitorsChanged() { refreshMonitors() }
 
-    // MARK: - USB redirection
-
-    public func refreshUsbDevices() {
-        guard let handle else {
-            usbDevices = []
-            return
-        }
-        let sessionHandle = handle
-        Task.detached(priority: .userInitiated) { [weak self] in
-            guard let self else { return }
-            var buf = [VMMUsbDeviceInfo](repeating: VMMUsbDeviceInfo(), count: 64)
-            let n = buf.withUnsafeMutableBufferPointer { ptr in
-                vmm_spice_usb_list_devices(sessionHandle, ptr.baseAddress, Int32(ptr.count))
-            }
-            let devices = (0..<Int(n)).map { SpiceUsbDevice(buf[$0]) }
-            await MainActor.run { self.usbDevices = devices }
-        }
-    }
-
-    public func connectUsbDevice(id: UInt32) {
-        guard let handle else { return }
-        vmm_spice_usb_connect(handle, id)
-    }
-
-    public func disconnectUsbDevice(id: UInt32) {
-        guard let handle else { return }
-        vmm_spice_usb_disconnect(handle, id)
-    }
-
-    func handleUsbDevicesChanged() { refreshUsbDevices() }
-
-    func handleUsbRedirectResult(deviceID: UInt32, ok: Bool, error: String?) {
-        if let error, !ok { usbMessage = error } else { usbMessage = nil }
-        refreshUsbDevices()
-    }
+    func handleGlScanoutActive(_ active: Bool) { glScanoutActive = active }
 
     private var canStart: Bool {
         switch status {

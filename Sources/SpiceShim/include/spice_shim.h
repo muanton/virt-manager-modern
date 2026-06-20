@@ -34,10 +34,8 @@ typedef struct {
                                  const uint8_t *data, size_t size);
     /* Guest monitor layout changed (plug/unplug or SPICE reconfig). Runner thread. */
     void (*monitors_changed)(void *ctx);
-    /* USB device list changed (plug/unplug or redirect state). Runner thread. */
-    void (*usb_devices_changed)(void *ctx);
-    /* Result of connect/disconnect redirect (runner thread). */
-    void (*usb_redirect_result)(void *ctx, uint32_t device_id, int ok, const char *error);
+    /* Guest is pushing GL scanout frames (no standard framebuffer). Runner thread. */
+    void (*gl_scanout_active)(void *ctx, int active);
 } VMMSpiceCallbacks;
 
 /** One guest display surface reported by a SPICE display channel. */
@@ -49,15 +47,6 @@ typedef struct {
     int width;
     int height;
 } VMMMonitorInfo;
-
-/** One host USB device visible to spice-gtk's device manager. */
-typedef struct {
-    uint32_t id;              /* (bus << 8) | address — stable while plugged in */
-    char description[256];
-    int connected;            /* redirected into the guest */
-    int can_redirect;
-    char block_reason[128];   /* set when can_redirect is 0 */
-} VMMUsbDeviceInfo;
 
 /* Create a session for host:port (typically 127.0.0.1:<tunnel port>). */
 VMMSpiceSession *vmm_spice_session_create(const char *host, int port,
@@ -85,14 +74,6 @@ void vmm_spice_clipboard_host_notify(VMMSpiceSession *s, uint32_t type,
 
 /* Guest audio (playback + microphone via spice-gtk / GStreamer). */
 void vmm_spice_audio_enable(VMMSpiceSession *s, int enabled);
-
-/* USB device redirection (requires usbredir-enabled spice-gtk build). */
-void vmm_spice_usb_enable(VMMSpiceSession *s, int enabled);
-
-/* List local USB devices (blocks until the runner thread returns; safe from any thread). */
-int vmm_spice_usb_list_devices(VMMSpiceSession *s, VMMUsbDeviceInfo *out, int max_count);
-void vmm_spice_usb_connect(VMMSpiceSession *s, uint32_t device_id);
-void vmm_spice_usb_disconnect(VMMSpiceSession *s, uint32_t device_id);
 
 int vmm_spice_list_monitors(VMMSpiceSession *s, VMMMonitorInfo *out, int max_count);
 void vmm_spice_select_monitor(VMMSpiceSession *s, int channel_id, int monitor_id);

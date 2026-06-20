@@ -90,18 +90,18 @@ a 20-year-old C virtualization API, with its own reproducible toolchain.
 - **SPICE and VNC consoles**, both tunnelled automatically over SSH and
   rendered natively (no GTK). Detach to a separate window with fullscreen.
   **Clipboard sharing** for SPICE (UTF-8) and VNC (RoyalVNCKit redirection),
-  **SPICE audio**, **USB redirection** with a device picker in the console
-  toolbar, and a **multi-monitor picker** when the guest exposes more than one
-  display — all toggled in **Settings** (⌘,). The Console tab picks the right
+  **SPICE audio**, and a **multi-monitor picker** when the guest exposes more
+  than one display — all toggled in **Settings** (⌘,). The Console tab picks the right
   protocol from the VM's `<graphics>` device — and falls back to a real **serial
   console** (terminal emulator over `virDomainOpenConsole`) for headless VMs.
   CD-ROM media can be ejected live; power actions auto-eject installers so they
   don't boot again.
 - **Live stats & guest IPs**: CPU%, memory, aggregate block/disk and network
   I/O, and **per-device disk & NIC throughput** per running VM in the sidebar
-  and Overview (event-driven VM list, stats polled every 5s); guest IP
-  addresses (guest agent or DHCP leases) with one-click copy; QEMU guest agent
-  status badge on Overview.
+  and Overview (event-driven VM list, stats polled every 5s), plus rolling
+  **history graphs** (CPU, memory, disk and network I/O over the last ~10
+  minutes) on the Overview tab; guest IP addresses (guest agent or DHCP leases)
+  with one-click copy; QEMU guest agent status badge on Overview.
 - **VM screenshots** on the Overview tab (`virDomainScreenshot`), auto-refresh
   every 30s while running, with Save to disk.
 - **Host dashboard**: per-connection host info (CPU model, installed memory,
@@ -116,8 +116,8 @@ a 20-year-old C virtualization API, with its own reproducible toolchain.
   straight into a host storage pool (libvirt streams — no scp).
 - **Live hotplug**: attach disks/NICs/USB devices to running VMs, detach them
   live, and resize vCPUs/memory without a restart.
-- **Preferences** (⌘,): default detail tab, SPICE/VNC clipboard, SPICE audio,
-  and USB redirection toggles.
+- **Preferences** (⌘,): default detail tab, SPICE/VNC clipboard, and SPICE
+  audio toggles.
 
 ## Requirements
 
@@ -178,10 +178,12 @@ into the bundle on `make app`; bump with `make bump-patch` / `bump-minor` /
 ## Status & limitations
 
 - VNC and SPICE consoles (scaled-to-fit, full keyboard/mouse, detach window).
-  Clipboard for both protocols (Settings to disable). SPICE audio, USB
-  redirection, and multi-monitor display selection are supported; no RDP yet.
-- VMs using virtio-gpu **GL scanout** (`<gl enable='yes'>`) aren't rendered —
-  use a non-GL video model or an external viewer.
+  Clipboard for both protocols (Settings to disable). SPICE audio and
+  multi-monitor display selection are supported; no RDP yet.
+- virtio-gpu **GL scanout** (`<gl enable='yes'>` on the graphics device) cannot
+  render in the native console over a remote SPICE tunnel (no EGL/DMA-BUF on
+  macOS). The Console tab warns and offers one-click disable; new VMs default to
+  `<gl enable='no'/>`.
 - Screenshots require a running VM with a graphics device; format is
   hypervisor-specific (usually PNG on QEMU/KVM).
 - Local builds are **ad-hoc signed**: on another Mac, right-click → Open the

@@ -59,7 +59,7 @@ final class HardwareModel: ObservableObject {
     func load() async {
         applyMessage = nil
         do {
-            let xml = try await session.domainXML(uuid: uuid)
+            let xml = try await session.editingDomainXML(uuid: uuid)
             config = try DomainConfig(xml: xml)
             devices = config?.deviceList() ?? []
             dirty = false
@@ -149,7 +149,12 @@ final class HardwareModel: ObservableObject {
         defer { applying = false }
         do {
             _ = try await session.defineXML(config.xmlString())
-            applyMessage = "Applied. Changes take effect after the VM restarts."
+            if isRunning {
+                try await session.syncCdromMedia(uuid: uuid, config: config)
+                applyMessage = "Applied. CD-ROM media is live; other changes need a VM restart."
+            } else {
+                applyMessage = "Applied. Changes take effect when the VM starts."
+            }
             await load()
         } catch {
             applyMessage = error.localizedDescription
@@ -160,7 +165,7 @@ final class HardwareModel: ObservableObject {
 
     static func isHotpluggable(_ kind: DeviceKind) -> Bool {
         switch kind {
-        case .disk, .cdrom, .interface, .hostdev, .redirdev: return true
+        case .disk, .cdrom, .interface, .hostdev: return true
         default: return false
         }
     }
@@ -290,6 +295,13 @@ final class HardwareModel: ObservableObject {
     var domainType: String { config?.domainType ?? "" }
     var arch: String { config?.arch ?? "" }
     var machine: String { config?.machine ?? "" }
+    var chipsetIsQ35: Bool { config?.chipsetIsQ35 ?? true }
+    func setChipset(q35: Bool) { config?.setChipset(q35: q35); touched() }
+    var firmwareIsEFI: Bool { config?.firmwareIsEFI ?? false }
+    func setFirmware(efi: Bool) { config?.setFirmware(efi: efi); touched() }
+    /// Firmware is always editable, but switching it on a VM that already has an OS
+    /// disk will almost certainly stop the guest booting — surface that as a warning.
+    var firmwareChangeRisky: Bool { config?.hasInstalledDisk ?? false }
     var emulator: String { config?.emulator ?? "" }
     var firmwareLabel: String { config?.firmwareLabel ?? "" }
 

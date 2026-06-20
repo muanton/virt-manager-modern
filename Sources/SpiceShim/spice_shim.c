@@ -4,7 +4,6 @@
 #include <channel-main.h>
 #include <spice-audio.h>
 #include <channel-display.h>
-#include <usb-device-manager.h>
 #include <spice/vd_agent.h>
 #include <glib.h>
 #include <stdint.h>
@@ -43,10 +42,6 @@ struct VMMSpiceSession {
     guint clipboard_release_src;
 
     int audio_enabled;
-    int usb_enabled;
-    SpiceUsbDeviceManager *usb_manager;
-    gulong usb_added_id;
-    gulong usb_removed_id;
 };
 
 /* ---- Shared GLib runner ------------------------------------------------- *
@@ -80,6 +75,8 @@ static void ensure_runner(void) {
 
 /* ---- display channel signals (run on the runner thread) ---- */
 
+static void notify_gl_scanout(VMMSpiceSession *s, int active);
+
 static void on_primary_create(SpiceChannel *channel, gint format, gint width,
                               gint height, gint stride, gint shmid,
                               gpointer imgdata, gpointer user_data) {
@@ -91,6 +88,7 @@ static void on_primary_create(SpiceChannel *channel, gint format, gint width,
     if (s->cb.primary_create)
         s->cb.primary_create(s->cb.ctx, format, width, height, stride,
                              (const uint8_t *)imgdata);
+    notify_gl_scanout(s, 0);
     if (!s->announced_connected && s->cb.state) {
         s->announced_connected = 1;
         s->cb.state(s->cb.ctx, 1, NULL);
@@ -186,10 +184,30 @@ static void on_monitors_changed(GObject *obj, GParamSpec *pspec, gpointer user_d
         s->cb.monitors_changed(s->cb.ctx);
 }
 
+static void notify_gl_scanout(VMMSpiceSession *s, int active) {
+    if (s->cb.gl_scanout_active)
+        s->cb.gl_scanout_active(s->cb.ctx, active);
+}
+
+static void on_gl_scanout_changed(GObject *obj, GParamSpec *pspec, gpointer user_data) {
+    (void)pspec;
+    VMMSpiceSession *s = user_data;
+    SpiceDisplayChannel *display = SPICE_DISPLAY_CHANNEL(obj);
+    const SpiceGlScanout *scanout = spice_display_channel_get_gl_scanout(display);
+    int active = (scanout != NULL && scanout->fd >= 0) ? 1 : 0;
+    SHIMLOG("gl-scanout changed active=%d", active);
+    notify_gl_scanout(s, active);
+}
+
 static void on_gl_draw(SpiceChannel *channel, guint32 x, guint32 y,
                        guint32 w, guint32 h, gpointer user_data) {
-    (void)channel; (void)x; (void)y; (void)user_data;
-    SHIMLOG("gl-draw %ux%u (VM uses GL scanout / virtio-gpu)", w, h);
+    (void)x; (void)y;
+    VMMSpiceSession *s = user_data;
+    if (channel != s->display)
+        return;
+    SHIMLOG("gl-draw %ux%u (GL scanout — releasing without EGL)", w, h);
+    notify_gl_scanout(s, 1);
+    spice_display_channel_gl_draw_done(SPICE_DISPLAY_CHANNEL(channel));
 }
 
 static void on_channel_event(SpiceChannel *channel, SpiceChannelEvent event,
@@ -351,6 +369,7 @@ static void on_channel_new(SpiceSession *session, SpiceChannel *channel,
         g_signal_connect(channel, "display-primary-destroy", G_CALLBACK(on_primary_destroy), s);
         g_signal_connect(channel, "display-invalidate", G_CALLBACK(on_invalidate), s);
         g_signal_connect(channel, "gl-draw", G_CALLBACK(on_gl_draw), s);
+        g_signal_connect(channel, "notify::gl-scanout", G_CALLBACK(on_gl_scanout_changed), s);
         g_signal_connect(channel, "notify::monitors", G_CALLBACK(on_monitors_changed), s);
         spice_channel_connect(channel);
         if (id == s->active_channel_id)
@@ -362,8 +381,6 @@ static void on_channel_new(SpiceSession *session, SpiceChannel *channel,
         spice_channel_connect(channel);
     } else if (type == SPICE_CHANNEL_PLAYBACK || type == SPICE_CHANNEL_RECORD) {
         SHIMLOG("channel-new audio type=%d (handled by SpiceAudio)", type);
-    } else if (type == SPICE_CHANNEL_USBREDIR) {
-        SHIMLOG("channel-new usbredir (handled by SpiceUsbDeviceManager)");
     }
 }
 
@@ -378,178 +395,6 @@ static void on_channel_destroy(SpiceSession *session, SpiceChannel *channel,
     }
     if (channel == s->main_channel) s->main_channel = NULL;
     if (SPICE_CHANNEL(s->inputs) == channel) s->inputs = NULL;
-}
-
-/* ---- USB device redirection --------------------------------------------- */
-
-static void notify_usb_changed(VMMSpiceSession *s) {
-    if (s->cb.usb_devices_changed)
-        s->cb.usb_devices_changed(s->cb.ctx);
-}
-
-static void on_usb_device_added(SpiceUsbDeviceManager *mgr, SpiceUsbDevice *device,
-                                gpointer user_data) {
-    (void)mgr; (void)device;
-    notify_usb_changed((VMMSpiceSession *)user_data);
-}
-
-static void on_usb_device_removed(SpiceUsbDeviceManager *mgr, SpiceUsbDevice *device,
-                                  gpointer user_data) {
-    (void)mgr; (void)device;
-    notify_usb_changed((VMMSpiceSession *)user_data);
-}
-
-static uint32_t usb_device_id(SpiceUsbDevice *device) {
-    /* Opaque SpiceUsbDevice pointer — stable while the device remains plugged in. */
-    return (uint32_t)(uintptr_t)device;
-}
-
-static void fill_usb_info(SpiceUsbDeviceManager *mgr, SpiceUsbDevice *device,
-                          VMMUsbDeviceInfo *info) {
-    memset(info, 0, sizeof(*info));
-    info->id = usb_device_id(device);
-    gchar *desc = spice_usb_device_get_description(device, NULL);
-    if (desc) {
-        g_strlcpy(info->description, desc, sizeof(info->description));
-        g_free(desc);
-    } else {
-        g_strlcpy(info->description, "USB device", sizeof(info->description));
-    }
-    info->connected = spice_usb_device_manager_is_device_connected(mgr, device) ? 1 : 0;
-    GError *err = NULL;
-    info->can_redirect = spice_usb_device_manager_can_redirect_device(mgr, device, &err) ? 1 : 0;
-    if (err) {
-        g_strlcpy(info->block_reason, err->message, sizeof(info->block_reason));
-        g_clear_error(&err);
-    }
-}
-
-static SpiceUsbDevice *find_usb_device(SpiceUsbDeviceManager *mgr, uint32_t device_id) {
-    GPtrArray *devices = spice_usb_device_manager_get_devices(mgr);
-    for (guint i = 0; i < devices->len; i++) {
-        SpiceUsbDevice *device = g_ptr_array_index(devices, i);
-        if (usb_device_id(device) == device_id)
-            return device;
-    }
-    return NULL;
-}
-
-static void detach_usb_signals(VMMSpiceSession *s) {
-    if (!s->usb_manager)
-        return;
-    if (s->usb_added_id) {
-        g_signal_handler_disconnect(s->usb_manager, s->usb_added_id);
-        s->usb_added_id = 0;
-    }
-    if (s->usb_removed_id) {
-        g_signal_handler_disconnect(s->usb_manager, s->usb_removed_id);
-        s->usb_removed_id = 0;
-    }
-    s->usb_manager = NULL;
-}
-
-typedef struct {
-    VMMSpiceSession *s;
-    VMMUsbDeviceInfo *out;
-    int max_count;
-    int count;
-    GMutex m;
-    GCond c;
-    int done;
-} UsbListOp;
-
-static gboolean usb_list_cb(gpointer data) {
-    UsbListOp *op = data;
-    VMMSpiceSession *s = op->s;
-    op->count = 0;
-    if (s->usb_manager && op->out && op->max_count > 0) {
-        GPtrArray *devices = spice_usb_device_manager_get_devices(s->usb_manager);
-        for (guint i = 0; i < devices->len && op->count < op->max_count; i++) {
-            fill_usb_info(s->usb_manager, g_ptr_array_index(devices, i),
-                          &op->out[op->count++]);
-        }
-    }
-    g_mutex_lock(&op->m);
-    op->done = 1;
-    g_cond_signal(&op->c);
-    g_mutex_unlock(&op->m);
-    return G_SOURCE_REMOVE;
-}
-
-typedef struct {
-    VMMSpiceSession *s;
-    uint32_t device_id;
-    int connect;
-} UsbRedirectOp;
-
-static void usb_redirect_done(GObject *source, GAsyncResult *res, gpointer data) {
-    (void)source;
-    UsbRedirectOp *op = data;
-    VMMSpiceSession *s = op->s;
-    GError *err = NULL;
-    gboolean ok;
-    if (op->connect)
-        ok = spice_usb_device_manager_connect_device_finish(s->usb_manager, res, &err);
-    else
-        ok = spice_usb_device_manager_disconnect_device_finish(s->usb_manager, res, &err);
-    if (s->cb.usb_redirect_result)
-        s->cb.usb_redirect_result(s->cb.ctx, op->device_id, ok ? 1 : 0,
-                                  err ? err->message : NULL);
-    g_clear_error(&err);
-    notify_usb_changed(s);
-    g_free(op);
-}
-
-static gboolean usb_redirect_cb(gpointer data) {
-    UsbRedirectOp *op = data;
-    VMMSpiceSession *s = op->s;
-    const char *fail = NULL;
-    if (!s->usb_manager)
-        fail = "USB manager unavailable";
-    else if (!find_usb_device(s->usb_manager, op->device_id))
-        fail = "Device not found";
-    if (fail) {
-        if (s->cb.usb_redirect_result)
-            s->cb.usb_redirect_result(s->cb.ctx, op->device_id, 0, fail);
-        g_free(op);
-        return G_SOURCE_REMOVE;
-    }
-    SpiceUsbDevice *device = find_usb_device(s->usb_manager, op->device_id);
-    if (op->connect) {
-        spice_usb_device_manager_connect_device_async(s->usb_manager, device, NULL,
-                                                      usb_redirect_done, op);
-    } else {
-        spice_usb_device_manager_disconnect_device_async(s->usb_manager, device, NULL,
-                                                         usb_redirect_done, op);
-    }
-    return G_SOURCE_REMOVE;
-}
-
-/* ---- lifecycle (all session work happens on the runner thread) ---- */
-
-static void apply_usb(VMMSpiceSession *s) {
-    if (!s->session)
-        return;
-    detach_usb_signals(s);
-    g_object_set(s->session, "enable-usbredir", s->usb_enabled ? TRUE : FALSE, NULL);
-    if (!s->usb_enabled)
-        return;
-    GError *err = NULL;
-    SpiceUsbDeviceManager *usb = spice_usb_device_manager_get(s->session, &err);
-    if (err) {
-        SHIMLOG("USB redirection unavailable: %s", err->message);
-        g_clear_error(&err);
-        return;
-    }
-    s->usb_manager = usb;
-    s->usb_added_id = g_signal_connect(usb, "device-added", G_CALLBACK(on_usb_device_added), s);
-    s->usb_removed_id = g_signal_connect(usb, "device-removed", G_CALLBACK(on_usb_device_removed), s);
-    SHIMLOG("USB redirection enabled");
-}
-
-static gboolean usb_enable_cb(gpointer data) {
-    apply_usb((VMMSpiceSession *)data);
-    return G_SOURCE_REMOVE;
 }
 
 static void apply_audio(VMMSpiceSession *s) {
@@ -574,7 +419,8 @@ static gboolean start_cb(gpointer data) {
     s->session = spice_session_new();
     char portstr[16];
     snprintf(portstr, sizeof(portstr), "%d", s->port);
-    g_object_set(s->session, "host", s->host, "port", portstr, NULL);
+    g_object_set(s->session, "host", s->host, "port", portstr,
+                 "gl-scanout", FALSE, NULL);
     if (s->password)
         g_object_set(s->session, "password", s->password, NULL);
 
@@ -582,11 +428,12 @@ static gboolean start_cb(gpointer data) {
     g_signal_connect(s->session, "channel-destroy", G_CALLBACK(on_channel_destroy), s);
 
     apply_audio(s);
-    apply_usb(s);
+    /* USB redirection is intentionally disabled: claiming a host USB interface
+       fails on macOS (LIBUSB_ERROR_ACCESS), so the feature was removed. */
+    g_object_set(s->session, "enable-usbredir", FALSE, NULL);
 
-    SHIMLOG("connecting to %s:%d (password=%s audio=%s usb=%s)", s->host, s->port,
-            s->password ? "yes" : "no", s->audio_enabled ? "on" : "off",
-            s->usb_enabled ? "on" : "off");
+    SHIMLOG("connecting to %s:%d (password=%s audio=%s)", s->host, s->port,
+            s->password ? "yes" : "no", s->audio_enabled ? "on" : "off");
     spice_session_connect(s->session);
     return G_SOURCE_REMOVE;
 }
@@ -609,7 +456,6 @@ static gboolean stop_cb(gpointer data) {
         g_list_free(channels);
         g_signal_handlers_disconnect_by_data(s->session, s);
 
-        detach_usb_signals(s);
         spice_session_disconnect(s->session);
         g_object_unref(s->session);
         s->session = NULL;
@@ -747,55 +593,6 @@ void vmm_spice_clipboard_enable(VMMSpiceSession *s, int enabled) {
 void vmm_spice_clipboard_host_grab(VMMSpiceSession *s) {
     if (!s || !s->clipboard_enabled || !g_runner_ctx) return;
     g_main_context_invoke(g_runner_ctx, host_grab_cb, s);
-}
-
-void vmm_spice_usb_enable(VMMSpiceSession *s, int enabled) {
-    if (!s)
-        return;
-    s->usb_enabled = enabled ? 1 : 0;
-    if (s->started && g_runner_ctx)
-        g_main_context_invoke(g_runner_ctx, usb_enable_cb, s);
-}
-
-int vmm_spice_usb_list_devices(VMMSpiceSession *s, VMMUsbDeviceInfo *out, int max_count) {
-    if (!s || !s->started || !g_runner_ctx || !out || max_count <= 0)
-        return 0;
-    UsbListOp op;
-    op.s = s;
-    op.out = out;
-    op.max_count = max_count;
-    op.count = 0;
-    op.done = 0;
-    g_mutex_init(&op.m);
-    g_cond_init(&op.c);
-    g_main_context_invoke(g_runner_ctx, usb_list_cb, &op);
-    g_mutex_lock(&op.m);
-    while (!op.done)
-        g_cond_wait(&op.c, &op.m);
-    g_mutex_unlock(&op.m);
-    g_mutex_clear(&op.m);
-    g_cond_clear(&op.c);
-    return op.count;
-}
-
-void vmm_spice_usb_connect(VMMSpiceSession *s, uint32_t device_id) {
-    if (!s || !s->started || !g_runner_ctx)
-        return;
-    UsbRedirectOp *op = g_new0(UsbRedirectOp, 1);
-    op->s = s;
-    op->device_id = device_id;
-    op->connect = 1;
-    g_main_context_invoke(g_runner_ctx, usb_redirect_cb, op);
-}
-
-void vmm_spice_usb_disconnect(VMMSpiceSession *s, uint32_t device_id) {
-    if (!s || !s->started || !g_runner_ctx)
-        return;
-    UsbRedirectOp *op = g_new0(UsbRedirectOp, 1);
-    op->s = s;
-    op->device_id = device_id;
-    op->connect = 0;
-    g_main_context_invoke(g_runner_ctx, usb_redirect_cb, op);
 }
 
 typedef struct {

@@ -14,9 +14,12 @@ public struct GraphicsInfo: Sendable, Equatable {
     public var listen: String?     // listen address, e.g. 127.0.0.1 or 0.0.0.0
     public var password: String?
     public var socketPath: String?
+    /// `<gl enable='yes'/>` on the graphics device (virtio-gpu virgl / GL scanout).
+    public var glEnabled: Bool
 
     public init(kind: Kind, port: Int? = nil, tlsPort: Int? = nil, autoport: Bool = false,
-                listen: String? = nil, password: String? = nil, socketPath: String? = nil) {
+                listen: String? = nil, password: String? = nil, socketPath: String? = nil,
+                glEnabled: Bool = false) {
         self.kind = kind
         self.port = port
         self.tlsPort = tlsPort
@@ -24,6 +27,7 @@ public struct GraphicsInfo: Sendable, Equatable {
         self.listen = listen
         self.password = password
         self.socketPath = socketPath
+        self.glEnabled = glEnabled
     }
 
     /// True when the console listens only on loopback / a non-public address,

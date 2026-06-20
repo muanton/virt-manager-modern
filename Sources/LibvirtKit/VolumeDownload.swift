@@ -5,11 +5,14 @@ extension LibvirtConnection {
     /// Downloads a storage volume to a local file over the libvirt stream API.
     public func downloadVolume(path: String, localURL: URL,
                                progress: @escaping @Sendable (Double) -> Void) async throws {
-        let conn = rawConnectionForStreaming()
         try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Void, Error>) in
             DispatchQueue.global(qos: .utility).async {
                 do {
-                    try Self.doDownload(conn: conn, path: path, localURL: localURL, progress: progress)
+                    // Reach the raw handle through `self` (an @unchecked Sendable
+                    // class) inside the closure rather than capturing the bare,
+                    // non-Sendable OpaquePointer.
+                    try Self.doDownload(conn: self.rawConnectionForStreaming(),
+                                        path: path, localURL: localURL, progress: progress)
                     cont.resume()
                 } catch {
                     cont.resume(throwing: error)
