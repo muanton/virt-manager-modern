@@ -80,9 +80,28 @@ struct ConnectionConfig: Identifiable, Codable, Hashable {
     var isRemote: Bool { (host?.isEmpty == false) }
 
     /// Host used for SSH tunnelling the console (nil for non-SSH transports).
-    var sshHost: String? { (transport == "ssh") ? host : nil }
-    var sshUser: String? { user }
-    var sshPort: Int? { port }
+    /// A raw URI such as `qemu+ssh://root@drill/system` carries the SSH target
+    /// itself, so read it from there instead of the (unset) form fields.
+    var sshHost: String? {
+        if let c = customURIComponents {
+            let transport = c.scheme?.split(separator: "+").dropFirst().first
+            return ["ssh", "libssh", "libssh2"].contains(transport) ? c.host : nil
+        }
+        return (transport == "ssh") ? host : nil
+    }
+    var sshUser: String? {
+        if let c = customURIComponents { return c.user }
+        return user
+    }
+    var sshPort: Int? {
+        if let c = customURIComponents { return c.port }
+        return port
+    }
+
+    private var customURIComponents: URLComponents? {
+        guard let customURI, !customURI.isEmpty else { return nil }
+        return URLComponents(string: customURI)
+    }
 
     /// The built-in `test:///default` connection cannot be removed.
     var isBuiltIn: Bool { customURI == "test:///default" }
